@@ -7,7 +7,19 @@
 
 */
 
-const float codeVersion = 2.5; // Software revision.
+/*
+ * Butchered by Wombii to accept SBUS and a simpler Serial as input.
+ * Changed sound setup to use 2 siren sounds instead of indicators
+ * Completely changed sound triggering
+ * Moved soundfiles to subfolder
+ * Rearranged functions to separate files
+ * Added a sound for applying brakes
+ * Disabled LED and shaker
+ * SBUS preparechannels function based on methods from SBUS library from https://github.com/mikeshub/FUTABA_SBUS
+ */
+
+//version = 2.4 - W-SBUS-2Siren-BEFORECLEANUP1
+//const float codeVersion = 2.4 with escpulse int fix from 2.5; // Software revision.
 
 //
 // =======================================================================================================
@@ -21,7 +33,7 @@ const float codeVersion = 2.5; // Software revision.
 // DEBUG options can slow down the playback loop! Only comment them out for debugging
 //#define DEBUG // uncomment it for general debugging informations
 //#define SERIAL_DEBUG // uncomment it to debug the serial command interface on pin 36
-#define DRIVE_STATE_DEBUG // uncomment it to debug the drive state statemachine
+//#define DRIVE_STATE_DEBUG // uncomment it to debug the drive state statemachine
 
 // TODO = Things to clean up!
 
@@ -32,7 +44,12 @@ const float codeVersion = 2.5; // Software revision.
 //
 
 #include "curves.h" // load nonlinear throttle curve arrays
-#include <statusLED.h> // https://github.com/TheDIYGuy999/statusLED <<------- Install the newest version!
+//#include <statusLED.h> // https://github.com/TheDIYGuy999/statusLED <<------- Install the newest version!
+
+#include <Preferences.h>
+
+/* create an instance of Preferences library */
+Preferences preferences;
 
 //
 // =======================================================================================================
@@ -46,6 +63,13 @@ const float codeVersion = 2.5; // Software revision.
 // provides short circuit protection. Also works on the serial Rx pin "VP" (36)
 // ------------------------------------------------------------------------------------
 
+
+#define TFT_DISPLAY 1
+#if defined TFT_DISPLAY
+  #include <TFT_eSPI.h> // Graphics and font library for ILI9341 driver chip
+  
+  TFT_eSPI tft = TFT_eSPI();  // Invoke library
+#endif
 // Serial command pins (active, if "SERIAL_COMMUNICATION" in Adjustments.h is not commented out)
 // see "sendSerialCommands()" in Micro RC Receiver code: https://github.com/TheDIYGuy999/Micro_RC_Receiver
 // This is still experimental! It works, but the sound quality is not perfect.
@@ -57,35 +81,33 @@ const float codeVersion = 2.5; // Software revision.
 
 // RC signal pins (active, if "SERIAL_COMMUNICATION" is commented out)
 // Channel numbers may be different on your recveiver!
-#define SERVO1_PIN 13 // connect to RC receiver servo output channel 1 (aileron, steering)
+#define SERVO1_PIN 14//13 // connect to RC receiver servo output channel 1 (aileron, steering)
 #define SERVO2_PIN 12 // connect to RC receiver servo output channel 2 (elevator, 3 pos. switch)
-#define SERVO3_PIN 14 // connect to RC receiver servo output channel 3 (throttle)
+#define SERVO3_PIN 13//14 // connect to RC receiver servo output channel 3 (throttle)
 #define SERVO4_PIN 27 // connect to RC receiver servo output channel 4 (rudder, pot)
 
-#define ESC_OUT_PIN 33 // connect crawler  ESC here (experimental, use it at your own risk!)
+//#define ESC_OUT_PIN 33 // connect crawler  ESC here (experimental, use it at your own risk!)
 
-#define HEADLIGHT_PIN 0 // White headllights
-#define TAILLIGHT_PIN 15 // Red tail- & brake-lights (combined)
-#define INDICATOR_LEFT_PIN 2 // Orange left indicator (turn signal) light
-#define INDICATOR_RIGHT_PIN 4 // Orange right indicator (turn signal) light
-#define FOGLIGHT_PIN 16 // (RX2) Fog lights
-#define REVERSING_LIGHT_PIN 17 // (TX2) White reversing light
-#define ROOFLIGHT_PIN 5 // Roof lights
-#define SIDELIGHT_PIN 18 // Side lights
+//#define HEADLIGHT_PIN 0 // White headllights
+//#define TAILLIGHT_PIN 15 // Red tail- & brake-lights
+//#define INDICATOR_LEFT_PIN 2 // Orange left indicator (turn signal) light
+//#define INDICATOR_RIGHT_PIN 4 // Orange right indicator (turn signal) light
+//#define FOGLIGHT_PIN 16 // (RX2) Fog lights
+//#define REVERSING_LIGHT_PIN 17 // (TX2) White reversing light
+//#define ROOFLIGHT_PIN 5 // Roof lights
+//#define SIDELIGHT_PIN 18 // Side lights
 
-#define BEACON_LIGHT2_PIN 19 // Blue beacons light
-#define BEACON_LIGHT1_PIN 21 // Blue beacons light
+//#define BEACON_LIGHT2_PIN 19 // Blue beacons light
+//#define BEACON_LIGHT1_PIN 21 // Blue beacons light
 
-#define BRAKELIGHT_PIN 32 // Upper brake lights
-
-#define SHAKER_MOTOR_PIN 23 // Shaker motor (shaking truck while idling)
+//#define SHAKER_MOTOR_PIN 23 // Shaker motor (shaking truck while idling)
 
 #define DAC1 25 // connect pin25 (do not change the pin) to a 10kOhm resistor
 #define DAC2 26 // connect pin26 (do not change the pin) to a 10kOhm resistor
 // both outputs of the resistors above are connected together and then to the outer leg of a
 // 10kOhm potentiometer. The other outer leg connects to GND. The middle leg connects to both inputs
 // of a PAM8403 amplifier and allows to adjust the volume. This way, two speakers can be used.
-
+/*
 // Status LED objects (also used for PWM shaker motor and ESC control)
 statusLED headLight(false); // "false" = output not inversed
 statusLED tailLight(false);
@@ -97,11 +119,37 @@ statusLED roofLight(false);
 statusLED sideLight(false);
 statusLED beaconLight1(false);
 statusLED beaconLight2(false);
-statusLED brakeLight(false);
 statusLED shakerMotor(false);
 statusLED escOut(false);
+*/
+
+#define SBUSserial Serial2
+#define HUMANSERIAL Serial
 
 // Define global variables
+
+byte buttonSetupCalibrationActive = 0;
+
+struct sbusdata
+{
+  unsigned int channels[18];
+  uint8_t failsafe;
+  byte channelsReady = 0;
+  byte centerValuesSaved = 0;
+  byte tempArray[25];
+} SBUS;
+
+struct remoteconfig
+{
+  int Neutral;
+  int UpperNeutral;
+  int LowerNeutral;
+  int Max;
+  int AxisReversed;
+  int reverseType2;
+} throttleSettings;
+
+uint8_t inputArray[25] = { 0xF,0xFF,0xFB,0xDF,0xFF,0xFE,0xF7,0xBF,0xFF,0xFD,0xEF,0x7F,0xFF,0xFB,0xDF,0xFF,0xFE,0xF7,0xBF,0xFF,0xFD,0xEF,0x7F,0x9,0x0 };
 
 boolean serialInit = false;
 
@@ -125,6 +173,7 @@ volatile boolean indicatorSoundOn = false;      // active, if indicator bulb is 
 volatile boolean lightsOn = false;              // Lights on
 
 volatile boolean airBrakeTrigger = false;       // Trigger for air brake noise
+volatile boolean airPuffTrigger = false; 
 volatile boolean EngineWasAboveIdle = false;    // Engine RPM was above idle
 //volatile boolean slowingDown = false;           // Engine is slowing down TODO
 
@@ -155,7 +204,7 @@ int16_t escPulseMin;
 
 volatile boolean pulseAvailable;                // RC signal pulses are coming in
 
-uint16_t pulseZero[4];                           // Usually 1500 (range 1000 - 2000us) Autocalibration active, if "engineManualOnOff" = "false"
+uint16_t pulseZero[4] = {1500,1500,1500,1500};                           // Usually 1500 (range 1000 - 2000us) Autocalibration active, if "engineManualOnOff" = "false"
 uint16_t pulseLimit = 700; // pulseZero +/- this value (700)
 
 int32_t axis1;                                  // Temporary variables for serial command parsing (for signals from "Micro RC" receiver)
@@ -169,6 +218,33 @@ boolean momentary1;
 boolean hazard;
 boolean left;
 boolean right;
+
+// - W
+int32_t throttleAxis;                                  // Temporary variables for serial command parsing (for signals from "Micro RC" receiver)
+int32_t hornAxis;                                  // See: https://github.com/TheDIYGuy999/Micro_RC_Receiver
+int32_t sirenAxis;
+int32_t ignitionAxis = 1;
+
+
+  byte throttleAxisReversed = 1;          //User setting. Overwritten by value stored in eeprom. Set in buttonSetupMenu.
+  //byte steeringAxisReversed = 0;          //User setting. Overwritten by value stored in eeprom. Set in buttonSetupMenu.
+
+  byte reverseType2 = 1;                  //User setting. Overwritten by value stored in eeprom, need a way to change it. Delayed or double pump reverse. 
+
+  int neutralUpperOffset = 80;           //User setting. Overwritten by value stored in eeprom, need a way to change it. Dead band setting for throttle.
+  int neutralLowerOffset = 80;           //User setting. Overwritten by value stored in eeprom, need a way to change it. Dead band setting for throttle.
+  
+  int throttleNeutralUpperLimit = 1440;   //Calculated on startup.
+  int throttleNeutralLowerLimit = 1415;   //Calculated on startup.
+  int throttleCenter = 1430;              //Recorded on startup.
+  int throttleFull = 1800;                //Used for soundmodule? Set in buttonSetupMenu.
+
+  //int steeringCenter = 1500;              //Recorded on startup. 
+
+  byte reverseDelayTicks = 200;
+
+// - 
+
 
 const int32_t maxRpm = 500;                     // always 500
 const int32_t minRpm = 0;                       // always 0
@@ -206,6 +282,7 @@ hw_timer_t * fixedTimer = NULL;
 portMUX_TYPE fixedTimerMux = portMUX_INITIALIZER_UNLOCKED;
 volatile uint32_t fixedTimerTicks = maxSampleInterval;
 
+
 //
 // =======================================================================================================
 // INTERRUPT FOR VARIABLE SPEED PLAYBACK (Engine sound, brake sound)
@@ -218,6 +295,7 @@ void IRAM_ATTR variablePlaybackTimer() {
   static uint32_t curEngineSample;              // Index of currently loaded engine sample
   static uint32_t curTurboSample;              // Index of currently loaded turbo sample
   static uint32_t curBrakeSample;               // Index of currently loaded brake sound sample
+  static uint32_t curBrakePuffSample;
   static uint32_t curStartSample;               // Index of currently loaded start sample
   static uint16_t attenuator;                   // Used for volume adjustment during engine switch off
   static uint16_t speedPercentage;              // slows the engine down during shutdown
@@ -279,6 +357,15 @@ void IRAM_ATTR variablePlaybackTimer() {
 
       // Air brake release sound, triggered after stop
       if (airBrakeTrigger) {
+        airPuffTrigger = false;
+        if (curBrakeSample == 0){           //fix popping if soundfile doesn't start at -128. -W
+          if ( brakeSamples[0] + 128 < b )
+            b--;
+          else if ( brakeSamples[0] + 128 > b )
+            b++;
+          else
+            curBrakeSample ++;
+        }
         if (curBrakeSample < brakeSampleCount) {
           b = (int)brakeSamples[curBrakeSample] + 128;
           curBrakeSample ++;
@@ -288,11 +375,58 @@ void IRAM_ATTR variablePlaybackTimer() {
           EngineWasAboveIdle = false;
         }
       }
+      /*
       else {
         b = 0; // Ensure full engine volume, so 0!!
         curBrakeSample = 0; // ensure, next sound will start @ first sample
       }
-
+*/
+      // Air brake engage sound, triggered when braking -W
+      else if (airPuffTrigger) {
+        if (curBrakePuffSample == 0){           //fix popping if soundfile doesn't start at -128. -W
+          if ( brakePuffSamples[0] + 128 > b )
+            b++;
+          else if ( brakePuffSamples[0] + 128 < b )
+            b--;
+          else
+            curBrakePuffSample ++;
+        }
+        else if (curBrakePuffSample < brakePuffSampleCount) {
+          b = (brakePuffSamples[curBrakePuffSample] * brakePuffVolumePercentage / 100) + 128;
+          b = (int)b;
+          curBrakePuffSample ++;
+        }
+        else {
+          airPuffTrigger = false;
+          EngineWasAboveIdle = false;
+        }
+      }
+      else {
+        //b = 0; // Ensure full engine volume, so 0!!
+        if (b>0)//-128) //fixes pop if soundfile doesn't end at -128. -W
+          b--;
+        curBrakeSample = 0;
+        curBrakePuffSample = 0; // ensure, next sound will start @ first sample
+      }
+      
+  /*   
+      if (airPuffTrigger) {
+        if (curBrakePuffSample < brakePuffSampleCount) {
+          b = (brakePuffSamples[curBrakePuffSample] * brakePuffVolumePercentage / 100) + 128;//(int)brakePuffSamples[curBrakePuffSample] + 128;
+          curBrakePuffSample ++;
+        }
+        else {
+          airPuffTrigger = false;
+          //EngineWasAboveIdle = false;
+          b = 0; // Ensure full engine volume, so 0!!
+          curBrakePuffSample = 0; // ensure, next sound will start @ first sample
+        }
+      }
+      //else {
+      //  b = 0; // Ensure full engine volume, so 0!!
+      //  curBrakePuffSample = 0; // ensure, next sound will start @ first sample
+      //}
+*/
 
       if (!engineOn) {
         speedPercentage = 100;
@@ -365,10 +499,13 @@ void IRAM_ATTR fixedPlaybackTimer() {
 
   static uint32_t curHornSample;                // Index of currently loaded horn sample
   static uint32_t curSirenSample;               // Index of currently loaded siren sample
+  static uint32_t curSiren2Sample;               // Index of currently loaded siren sample
   static uint32_t curSound1Sample;              // Index of currently loaded sound1 sample
   static uint32_t curReversingSample;           // Index of currently loaded reversing beep sample
   static uint32_t curIndicatorSample;           // Index of currently loaded indicator tick sample
   static int32_t a, b, b1, b2;                 // Two input signals for mixer: a = horn or siren, b = reversing sound, indicator sound
+
+  static uint8_t hornsequence = 0;
 
   portENTER_CRITICAL_ISR(&fixedTimerMux);
 
@@ -376,21 +513,21 @@ void IRAM_ATTR fixedPlaybackTimer() {
 
     // Group "a" (never more than one active at a time) ----------------------------------------------
 
-    case 0: // Horn "a" ----
-      fixedTimerTicks = 4000000 / hornSampleRate; // our fixed sampling rate
+    case 2: // Horn "a" ----
+      fixedTimerTicks = 4000000 / siren2SampleRate; // our fixed sampling rate
       timerAlarmWrite(fixedTimer, fixedTimerTicks, true); // // change timer ticks, autoreload true
       curSirenSample = 0;
       curSound1Sample = 0;
 
-      if (hornOn) {
-        if (curHornSample < hornSampleCount) {
-          a =  (hornSamples[curHornSample] * hornVolumePercentage / 100) + 128;
-          curHornSample ++;
+      if (sirenOn) {
+        if (curSiren2Sample < siren2SampleCount) {
+          a = (siren2Samples[curSiren2Sample] * siren2VolumePercentage / 100) + 128;
+          curSiren2Sample ++;
         }
         else {
-          curHornSample = 0;
+          curSiren2Sample = 0;
           a = 128;
-          if (!hornSwitch) hornOn = false; // Latch required to prevent it from popping
+          if (!sirenSwitch) sirenOn = false; // Latch required to prevent it from popping
         }
       }
       break;
@@ -398,8 +535,9 @@ void IRAM_ATTR fixedPlaybackTimer() {
     case 1: // Siren "a" ----
       fixedTimerTicks = 4000000 / sirenSampleRate; // our fixed sampling rate
       timerAlarmWrite(fixedTimer, fixedTimerTicks, true); // // change timer ticks, autoreload true
-      curHornSample = 0;
+      //curHornSample = 0;
       curSound1Sample = 0;
+      curSiren2Sample = 0;
 
       if (sirenOn) {
         if (curSirenSample < sirenSampleCount) {
@@ -414,11 +552,11 @@ void IRAM_ATTR fixedPlaybackTimer() {
       }
       break;
 
-    case 2: // Sound 1 "a" ----
+    case 0: // Sound 1 "a" ----
       fixedTimerTicks = 4000000 / sound1SampleRate; // our fixed sampling rate
       timerAlarmWrite(fixedTimer, fixedTimerTicks, true); // // change timer ticks, autoreload true
       curSirenSample = 0;
-      curHornSample = 0;
+      //curHornSample = 0;
 
       if (sound1On) {
         if (curSound1Sample < sound1SampleCount) {
@@ -455,7 +593,7 @@ void IRAM_ATTR fixedPlaybackTimer() {
     curReversingSample = 0;
     b1 = 128;
   }
-
+/*
   // Indicator tick sound "b2" ----
   if (indicatorSoundOn) {
     fixedTimerTicks = 4000000 / indicatorSampleRate; // our fixed sampling rate
@@ -474,6 +612,108 @@ void IRAM_ATTR fixedPlaybackTimer() {
     curIndicatorSample = 0;
     b2 = 128;
   }
+*/    
+/*
+  if hornon
+    if hornsequence 0
+      hornsequence=1
+    if hornsequence 1
+      play intro
+      if intro end
+        hornsequence 2
+    if hornsequence 2
+      play loop
+  else
+    if hornsequence >0 //(horn was playing
+      play outro
+      if outro end
+        hornsequence 0
+*/
+  //  Looping horn -W
+  //  plays the start of the file, then loops the middle of the file and ends with the end of the file
+  #define HORNLOOPSTART 8000    
+  #define HORNLOOPEND   12000
+  if (hornOn) {
+    switch(hornsequence){
+      case 0:
+        //if we just started, go to intro
+        hornsequence = 1;
+  
+      case 1:
+        //play intro
+        fixedTimerTicks = 4000000 / hornSampleRate; // our fixed sampling rate
+        timerAlarmWrite(fixedTimer, fixedTimerTicks, true); // // change timer ticks, autoreload true
+       
+        if (curHornSample < HORNLOOPSTART){
+          b2 =  (hornSamples[curHornSample] * hornVolumePercentage / 100) + 128;
+          curHornSample ++;
+        }
+        else {
+          //curHornSample = 10000; //play from middle of the file
+          //b2 = 128;
+          hornsequence = 2;
+          //if (!hornSwitch) hornOn = false; // Latch required to prevent it from popping
+        }
+        break;
+  
+      case 2:
+        //play loop
+        fixedTimerTicks = 4000000 / hornSampleRate; // our fixed sampling rate
+        timerAlarmWrite(fixedTimer, fixedTimerTicks, true); // // change timer ticks, autoreload true
+       
+        if (curHornSample < HORNLOOPEND){
+          b2 =  (hornSamples[curHornSample] * hornVolumePercentage / 100) + 128;
+          curHornSample ++;
+        }
+        else {
+          curHornSample = HORNLOOPSTART;
+          //b2 = 128;
+          //if (!hornSwitch) hornOn = false; // Latch required to prevent it from popping
+        }
+        break;
+  
+    }
+  }
+  else
+  {
+    if (hornsequence)
+    {
+      fixedTimerTicks = 4000000 / hornSampleRate; // our fixed sampling rate
+      timerAlarmWrite(fixedTimer, fixedTimerTicks, true); // // change timer ticks, autoreload true
+     
+      if (curHornSample < hornSampleCount) {
+        b2 =  (hornSamples[curHornSample] * hornVolumePercentage / 100) + 128;
+        curHornSample ++;
+      }
+      else {
+        curHornSample = 0;
+        b2 = 128;
+        hornsequence = 0;
+        //if (!hornSwitch) hornOn = false; // Latch required to prevent it from popping
+      }
+    }
+  }
+    
+    
+/*
+  if (hornOn) {
+    fixedTimerTicks = 4000000 / hornSampleRate; // our fixed sampling rate
+    timerAlarmWrite(fixedTimer, fixedTimerTicks, true); // // change timer ticks, autoreload true
+   
+    if (curHornSample < hornSampleCount) {
+      b2 =  (hornSamples[curHornSample] * hornVolumePercentage / 100) + 128;
+      curHornSample ++;
+    }
+    else {
+      curHornSample = 0;
+      b2 = 128;
+      //if (!hornSwitch) hornOn = false; // Latch required to prevent it from popping
+    }
+  }
+  else {
+    curIndicatorSample = 0;
+    b2 = 128;
+  }*/
 
   // Mixing "b1" + "b2" together ----
   //b = (b1 + b2 - b1 * b2 / 255);
@@ -523,6 +763,8 @@ void IRAM_ATTR readPpm() {
   }
 }
 
+
+
 //
 // =======================================================================================================
 // MAIN ARDUINO SETUP (1x during startup)
@@ -531,18 +773,24 @@ void IRAM_ATTR readPpm() {
 
 void setup() {
 
+ 
+ 
+
+
   // Watchdog timers need to be disabled, if task 1 is running without delay(1)
   disableCore0WDT();
   disableCore1WDT();
 
   // Pin modes
-  pinMode(SERVO1_PIN, INPUT_PULLDOWN);
-  pinMode(SERVO2_PIN, INPUT_PULLDOWN);
+  //pinMode(SERVO1_PIN, INPUT_PULLDOWN);
+  //pinMode(SERVO2_PIN, INPUT_PULLDOWN);
   pinMode(SERVO3_PIN, INPUT_PULLDOWN);
-  pinMode(SERVO4_PIN, INPUT_PULLDOWN);
+  //pinMode(SERVO4_PIN, INPUT_PULLDOWN);
+
+  pinMode(35,INPUT_PULLDOWN); //GPIO 35 button on TTGO_display esp32 module
 
   pinMode(PPM_PIN, INPUT_PULLDOWN);
-
+/*
   // LED & shaker motor setup (note, that we only have timers from 0 - 15)
   headLight.begin(HEADLIGHT_PIN, 1, 500); // Timer 1, 500Hz
   tailLight.begin(TAILLIGHT_PIN, 2, 500); // Timer 2, 500Hz
@@ -555,21 +803,27 @@ void setup() {
   beaconLight1.begin(BEACON_LIGHT1_PIN, 9, 500); // Timer 9, 500Hz
   beaconLight2.begin(BEACON_LIGHT2_PIN, 10, 500); // Timer 10, 500Hz
 
-  brakeLight.begin(BRAKELIGHT_PIN, 11, 500); // Timer 11, 500Hz
-
   shakerMotor.begin(SHAKER_MOTOR_PIN, 13, 500); // Timer 13, 500Hz
 
   escOut.begin(ESC_OUT_PIN, 15, 50, 16); // Timer 15, 50Hz, 16bit (experimental)
-
+*/
   // Serial setup
   Serial.begin(115200); // USB serial
 
-#ifdef SERIAL_COMMUNICATION
-  Serial2.begin(115200, SERIAL_8N1, COMMAND_RX, COMMAND_TX);
-#endif
+  Serial2.begin(100000, SERIAL_8N1, 17,33);
+
+//#ifdef SERIAL_COMMUNICATION
+//  Serial2.begin(115200, SERIAL_8N1, COMMAND_RX, COMMAND_TX);
+//#endif
+
+  // --- Read saved preferences from non-volatile storage ---
+  ReadSavedPreferences();
+
+  //SavePreferences();
+
 
   // PPM Setup
-  attachInterrupt(digitalPinToInterrupt(PPM_PIN), readPpm, RISING);
+  //attachInterrupt(digitalPinToInterrupt(PPM_PIN), readPpm, RISING);
   timelast = micros();
   timelastloop = timelast;
 
@@ -601,6 +855,11 @@ void setup() {
   timerAlarmWrite(fixedTimer, fixedTimerTicks, true); // autoreload true
   timerAlarmEnable(fixedTimer); // enable
 
+
+  
+
+
+  
   // wait for RC receiver to initialize
   while (millis() <= 1000);
 
@@ -616,21 +875,27 @@ void setup() {
   readRcSignals();
 #endif
 
+#if defined TFT_DISPLAY
+  tft.init();
+  tft.setRotation(2);
+  tft.fillScreen(0x5AEB);//TFT_GREY);
+#endif
+
   // then compute the RC channel offsets:
 
   // CH1
-  if (indicators) pulseZero[0] = pulseWidth[0]; // store steering offset (only, if "indicators" active)
-  else pulseZero[0] = 1500;
+  //if (indicators) pulseZero[0] = pulseWidth[0]; // store steering offset (only, if "indicators" active)
+  //else pulseZero[0] = 1500;
 
   // CH2
-  pulseZero[1] = 1500; // This channel is controlled by a 3 position switch, so we don't want auto calibration!
+  //pulseZero[1] = 1500; // This channel is controlled by a 3 position switch, so we don't want auto calibration!
 
   // CH3
   if (!engineManualOnOff) pulseZero[2] = pulseWidth[2]; // store throttle offset (only, if "engineManualOnOff" inactive)
   else pulseZero[2] = 1500;
 
   // CH4
-  pulseZero[3] = 1500; // This channel is controlled by a potentiometer, so we don't want auto calibration!
+  //pulseZero[3] = 1500; // This channel is controlled by a potentiometer, so we don't want auto calibration!
 
   // Calculate RC signal ranges for all channels (0, 1, 2, 3)
   for (uint8_t i = 0; i <= 3; i++) {
@@ -645,731 +910,83 @@ void setup() {
   // ESC output
   escPulseMax = pulseZero[2] + escPulseSpan;
   escPulseMin = pulseZero[2] - escPulseSpan;
-}
 
-//
-// =======================================================================================================
-// READ SERIAL COMMMANDS (only compatible with my "Micro RC" receiver)
-// =======================================================================================================
-// See: https://github.com/TheDIYGuy999/Micro_RC_Receiver
-//      https://forum.arduino.cc/index.php?topic=288234.0
 
-const int32_t numChars = 256;
-char receivedChars[numChars];
-
-void readSerialCommands() {
-  static unsigned long lastSerialRcv;
-  static boolean recvInProgress = false;
-  static byte index = 0;
-  char startMarker = '<'; // Indicates the begin of our data
-  char endMarker = '>'; // Indicates the end of our data
-  char currentChar; // The currently read character
-
-  if (millis() - lastSerialRcv > 300) failSafe = true; // Set failsafe mode, if serial command watchdog was triggered
-  else failSafe = false;
-
-  if (Serial2.available() > 0) {
-    currentChar = Serial2.read();
-    lastSerialRcv = millis();
-
-    if (recvInProgress == true) {
-      if (currentChar != endMarker) { // End marker not yet detected
-        receivedChars[index] = currentChar;
-        index++;
-        if (index >= numChars) {
-          index = numChars - 1;
+  // First loop: set center values for throttle and steering
+        static byte haveReadCenterValues = 0;
+        if (!haveReadCenterValues){
+          //int throttleCenter;
+          throttleCenter = pulseZero[2];
+          Serial.println(throttleCenter);
+          //steeringCenter = SBUS.channels[1];
+          haveReadCenterValues = 1;
+          //set neutral range?
+          throttleNeutralLowerLimit = throttleCenter - neutralLowerOffset;
+          throttleNeutralUpperLimit = throttleCenter + neutralUpperOffset;
         }
+
+
+  // Hold down button 2 to enter calibration.
+      if (digitalRead(35) == LOW)
+      {
+        HUMANSERIAL.println("low");
+        buttonSetupCalibrationActive = 1;
       }
-      else { // End marker detected
-        receivedChars[index] = '\0'; // terminate the string, if end marker detected
-        recvInProgress = false;
-        index = 0;
-        parseSerialCommands(); // Call parsing sub function
-      }
-    }
-
-    if (currentChar == startMarker) { // Start marker detected
-      recvInProgress = true;
-    }
-  }
-
-  // Falisafe for RC signals
-  failsafeRcSignals();
-
-}
-
-// Parsing sub function ----
-void parseSerialCommands() {
-
-  char * strtokIindex;
-  char delimiter[2] = "\n"; // used to separate the variables (generated by "println" on the receiver)
-
-  // split the data into its parts
-  // order see "sendSerialCommands()" in Micro RC Receiver code: https://github.com/TheDIYGuy999/Micro_RC_Receiver
-  strtokIindex = strtok(receivedChars, delimiter);
-  axis1 = atoi(strtokIindex);
-  strtokIindex = strtok(NULL, delimiter);
-  axis2 = atoi(strtokIindex);
-  strtokIindex = strtok(NULL, delimiter);
-  axis3 = atoi(strtokIindex);
-  strtokIindex = strtok(NULL, delimiter);
-  axis4 = atoi(strtokIindex);
-  strtokIindex = strtok(NULL, delimiter);
-  pot1 = atoi(strtokIindex);
-  strtokIindex = strtok(NULL, delimiter);
-  mode1 = atoi(strtokIindex);
-  strtokIindex = strtok(NULL, delimiter);
-  mode2 = atoi(strtokIindex);
-  strtokIindex = strtok(NULL, delimiter);
-  momentary1 = atoi(strtokIindex);
-  strtokIindex = strtok(NULL, delimiter);
-  hazard = atoi(strtokIindex);
-  strtokIindex = strtok(NULL, delimiter);
-  left = atoi(strtokIindex);
-  strtokIindex = strtok(NULL, delimiter);
-  right = atoi(strtokIindex);
-
-  // Convert signals to servo pulses in ms
-  pulseWidth[0] = map(axis1, 0, 100, 1000, 2000); // CH1 Steering
-  pulseWidth[1] = map(axis2, 0, 100, 1000, 2000); // CH2
-  pulseWidth[2] = map(axis3, 0, 100, 1000, 2000); // CH3 Throttle
-  pulseWidth[3] = map(pot1, 0, 100, 1000, 2000); // Pot1 Horn
-
-  // Invert RC signals
-  invertRcSignals();
-
-  serialInit = true; // first serial data block was processed
-}
-
-//
-// =======================================================================================================
-// READ PPM MULTI CHANNEL COMMMANDS (compatible with many receivers)
-// =======================================================================================================
-//
-
-void readPpmCommands() {
-  pulseWidth[0] = valuesBuf[0]; // CH1 Steering
-  pulseWidth[1] = 1500; // CH2
-  pulseWidth[2] = valuesBuf[1]; // CH3 Throttle
-  pulseWidth[3] = valuesBuf[2]; // Pot1 Horn
-
-  // Invert RC signals
-  invertRcSignals();
-
-  // Falisafe for RC signals
-  failsafeRcSignals();
-}
-
-//
-// =======================================================================================================
-// PRINT SERIAL DATA
-// =======================================================================================================
-//
-
-void showParsedData() {
-  static unsigned long lastSerialTime;
-#ifdef SERIAL_DEBUG
-  if (millis() - lastSerialTime > 300) { // Print the data every 300ms
-    lastSerialTime = millis();
-    Serial.print("axis 1 ");
-    Serial.println(axis1);
-    Serial.print("axis 2 ");
-    Serial.println(axis2);
-    Serial.print("axis 3 ");
-    Serial.println(axis3);
-    Serial.print("axis 4 ");
-    Serial.println(axis4);
-    Serial.print("pot 1 ");
-    Serial.println(pot1);
-    Serial.print("mode 1 ");
-    Serial.println(mode1);
-    Serial.print("mode 2 ");
-    Serial.println(mode2);
-    Serial.print("momenrary 1 ");
-    Serial.println(momentary1);
-    Serial.print("hazard ");
-    Serial.println(hazard);
-    Serial.print("left ");
-    Serial.println(left);
-    Serial.print("right ");
-    Serial.println(right);
-    Serial.print("loop time ");
-    Serial.println(loopTime);
-    Serial.println("");
-  }
-#endif
-}
-
-//
-// =======================================================================================================
-// READ PWM RC SIGNALS
-// =======================================================================================================
-//
-
-void readRcSignals() {
-  // measure RC signal pulsewidth:
-
-  // CH1 Steering
-  if (indicators) pulseWidth[0] = pulseIn(SERVO1_PIN, HIGH, 50000);
-  else pulseWidth[0] = 1500;
-
-  // CH2 (not used, gearbox servo)
-  pulseWidth[1] = pulseIn(SERVO2_PIN, HIGH, 50000);
-
-  // CH3 Throttle
-  pulseWidth[2] = pulseIn(SERVO3_PIN, HIGH, 50000);
-  if (pulseWidth[2] == 0) failSafe = true; // 0, if timeout (signal loss)
-  else failSafe = false;
-
-  // CH4 Additional sound trigger (RC signal with 3 positions)
-  if (pwmSoundTrigger) pulseWidth[3] = pulseIn(SERVO4_PIN, HIGH, 50000);
-  else pulseWidth[3] = 1500;
-
-  // Invert RC signals
-  invertRcSignals();
-
-  // Falisafe for RC signals
-  failsafeRcSignals();
-}
-
-//
-// =======================================================================================================
-// INVERT RC SIGNALS (if your signals are inverted)
-// =======================================================================================================
-//
-
-void invertRcSignals() {
-  if (INDICATOR_DIR) pulseWidth[0] = map(pulseWidth[0], 0, 3000, 3000, 0); // invert steering direction
-}
-
-//
-// =======================================================================================================
-// RC SIGNAL FAILSAFE POSITIONS (if serial signal lost)
-// =======================================================================================================
-//
-
-void failsafeRcSignals() {
-
-  // PPM signal surveillance (serial & PWM communication does not need any actions here) --------
-#if defined PPM_COMMUNICATION
-  static unsigned long ppmFailsafeMillis;
-
-  if (millis() - ppmFailsafeMillis > 50) { // Every 50ms
-    ppmFailsafeMillis = millis();
-
-    if (ppmFailsafeCounter < 10) ppmFailsafeCounter ++ ; //it will be reset in the ppm interrupt
-  }
-  if (ppmFailsafeCounter > 5) failSafe = true;
-#endif
-
-  // Failsafe actions --------
-  if (failSafe) pulseWidth[2] = pulseZero[2]; // Throttle to zero position!
-}
-
-//
-// =======================================================================================================
-// HORN TRIGGERING, SIREN TRIGGERING, SOUND1 TRIGGERING BY CH4 (POT)
-// =======================================================================================================
-//
-
-void triggerHorn() {
-  if (pwmSoundTrigger) { // PWM RC signal mode --------------------------------------------
-
-    // detect horn trigger ( impulse length > 1700us) -------------
-    if (pulseWidth[3] > (pulseMaxNeutral[3] + 180) && pulseWidth[3] < pulseMaxLimit[3]) {
-      hornSwitch = true;
-      //sirenSwitch = false;
-      soundNo = 0;  // 0 = horn
-    }
-    else hornSwitch = false;
-
-    // detect siren trigger ( impulse length < 1300us) ----------
-    if (pulseWidth[3] < (pulseMinNeutral[3] - 180) && pulseWidth[3] > pulseMinLimit[3]) {
-      sirenSwitch = true;
-      //hornSwitch = false;
-      soundNo = 1;  // 1 = siren
-    }
-    else sirenSwitch = false;
-
-    // Sound 1 triggered via momentary1 button (Micro RC in serial mode only) ---------
-    if (momentary1  && !hornSwitch  && !sirenSwitch) {
-      sound1Switch = true;
-      soundNo = 2; // 2 = sound1
-    }
-    else sound1Switch = false;
-
-  }
-  else { // High level triggering mode ---------------------------------------------------
-
-    // detect horn trigger (constant high level)
-    if (digitalRead(SERVO4_PIN)) {
-      hornSwitch = true;
-      soundNo = 0;  // 0 = horn
-    }
-    else hornSwitch = false;
-  }
-
-  // Latches (required to prevent sound seams from popping) --------------------------------
-
-  if (hornSwitch) {
-    hornOn = true;
-    sirenOn = false;
-    sound1On = false;
-  }
-  if (sirenSwitch) {
-    sirenOn = true;
-    hornOn = false;
-    sound1On = false;
-  }
-  if (sound1Switch) {
-    sound1On = true;
-    sirenOn = false;
-    hornOn = false;
-  }
-}
-
-//
-// =======================================================================================================
-// INDICATOR (TURN SIGNAL) TRIGGERING BY CH1 (STEERING)
-// =======================================================================================================
-//
-
-void triggerIndicators() {
-
-  // detect left indicator trigger ( impulse length > 1700us) -------------
-  if (pulseWidth[0] > (pulseMaxNeutral[0] + 30) && pulseWidth[0] < pulseMaxLimit[0]) indicatorLon = true;
-  if (pulseWidth[0] < pulseMaxNeutral[0]) indicatorLon = false;
-
-
-  // detect right indicator trigger ( impulse length < 1300us) ----------
-  if (pulseWidth[0] < (pulseMinNeutral[0] - 30) && pulseWidth[0] > pulseMinLimit[0]) indicatorRon = true;
-  if (pulseWidth[0] > pulseMinNeutral[0]) indicatorRon = false;
-}
-
-//
-// =======================================================================================================
-// MAP PULSEWIDTH TO THROTTLE CH3
-// =======================================================================================================
-//
-
-void mapThrottle() {
-
-  static unsigned long reversingMillis; // TODO
-
-  // Input is around 1000 - 2000us, output 0-500 for forward and backwards
-
-  // check if the pulsewidth looks like a servo pulse
-  if (pulseWidth[2] > pulseMinLimit[2] && pulseWidth[2] < pulseMaxLimit[2]) {
-    if (pulseWidth[2] < pulseMin[2]) pulseWidth[2] = pulseMin[2]; // Constrain the value
-    if (pulseWidth[2] > pulseMax[2]) pulseWidth[2] = pulseMax[2];
-
-    // calculate a throttle value from the pulsewidth signal
-    if (pulseWidth[2] > pulseMaxNeutral[2]) {
-      currentThrottle = map(pulseWidth[2], pulseMaxNeutral[2], pulseMax[2], 0, 500);
-      throttleReverse = false;
-    }
-    else if (pulseWidth[2] < pulseMinNeutral[2]) {
-      currentThrottle = map(pulseWidth[2], pulseMinNeutral[2], pulseMin[2], 0, 500);
-      throttleReverse = true;
-    }
-    else {
-      currentThrottle = 0;
-    }
-  }
-
-  // Calculate throttle dependent engine volume
-  if (!escIsBraking && engineRunning) throttleDependentVolume = map(currentThrottle, 0, 500, engineIdleVolumePercentage, 100);
-  else throttleDependentVolume = engineIdleVolumePercentage;
-
-  // Calculate engine rpm dependent turbo volume
-  if (!escIsBraking && engineRunning) throttleDependentTurboVolume = map(currentRpm, 0, 500, turboIdleVolumePercentage, 100);
-  else throttleDependentTurboVolume = turboIdleVolumePercentage;
-
-  // reversing sound trigger signal (TODO)
-  /*if (reverseSoundMode == 1) {
-    if (pulseWidth[2] <= pulseMaxNeutral[2]) {
-      reversingMillis = millis();
-    }
-
-    if (millis() - reversingMillis > 200) {
-      reversingSoundOn = true;
-    }
-    else reversingSoundOn = false;
-    }
-
-    if (reverseSoundMode == 2) {
-    if (pulseWidth[2] >= pulseMinNeutral[2]) {
-      reversingMillis = millis();
-    }
-
-    if (millis() - reversingMillis > 200) {
-      reversingSoundOn = true;
-    }
-    else reversingSoundOn = false;
-    }
-
-    if (reverseSoundMode == 0) {
-    reversingSoundOn = false;
-    }*/
-}
-
-//
-// =======================================================================================================
-// ENGINE MASS SIMULATION
-// =======================================================================================================
-//
-
-void engineMassSimulation() {
-
-  static int32_t  mappedThrottle = 0;
-  static unsigned long throtMillis;
-  static unsigned long printMillis;
-
-  if (millis() - throtMillis > 2) { // Every 2ms
-    throtMillis = millis();
-
-    // compute rpm curves
-    if (shifted) mappedThrottle = reMap(curveShifting, currentThrottle);
-    else mappedThrottle = reMap(curveLinear, currentThrottle);
-
-
-    // Accelerate engine
-    if (mappedThrottle > (currentRpm + acc) && (currentRpm + acc) < maxRpm && engineState == 2 && !escIsBraking && engineRunning) {
-      if (!airBrakeTrigger) { // No acceleration, if brake release noise still playing
-        currentRpm += acc;
-        if (currentRpm > maxRpm) currentRpm = maxRpm;
-      }
-    }
-
-    // Decelerate engine
-    if (mappedThrottle < currentRpm || escIsBraking) {
-      currentRpm -= dec;
-      if (currentRpm < minRpm) currentRpm = minRpm;
-    }
-
-
-    // Speed (sample rate) output
-    currentRpmScaled = map(currentRpm, minRpm, maxRpm, maxSampleInterval, minSampleInterval);
-  }
-
-  // Brake light trigger TODO
-  /*if (mappedThrottle < (currentRpm - 200)) slowingDown = true;
-    if (mappedThrottle >= (currentRpm - 10)) slowingDown = false;*/
-
-  // Print debug infos
-#ifdef DEBUG // can slow down the playback loop!
-  if (millis() - printMillis > 1000) { // Every 1000ms
-    printMillis = millis();
-
-    Serial.println("CH1");
-    Serial.println(pulseWidth[0]);
-    Serial.println(pulseMinNeutral[0]);
-    Serial.println(pulseMaxNeutral[0]);
-    Serial.println("CH2");
-    Serial.println(pulseWidth[1]);
-    Serial.println(pulseMinNeutral[1]);
-    Serial.println(pulseMaxNeutral[1]);
-    Serial.println("CH3");
-    Serial.println(pulseWidth[2]);
-    Serial.println(pulseMinNeutral[2]);
-    Serial.println(pulseMaxNeutral[2]);
-    Serial.println("CH4");
-    Serial.println(pulseWidth[3]);
-    Serial.println(pulseMinNeutral[3]);
-    Serial.println(pulseMaxNeutral[3]);
-    Serial.println(" ");
-    /*Serial.println(currentThrottle);
-    Serial.println(mappedThrottle);
-    Serial.println(currentRpm);
-    Serial.println(currentRpmScaled);
-    Serial.println(engineState);
-    Serial.println(" ");
-    Serial.println(loopTime);
-    Serial.println(" ");
-    Serial.println(airBrakeTrigger);
-    Serial.println(EngineWasAboveIdle);
-    Serial.println(throttleDependentVolume);
-    Serial.println(sound1On);
-    Serial.println(soundNo);
-    Serial.print("PPM Failsafe Counter ");
-    Serial.println(ppmFailsafeCounter);
-    Serial.print("failSafe ");
-    Serial.println(failSafe);*/
-
-  }
-#endif
-}
-
-//
-// =======================================================================================================
-// SWITCH ENGINE ON OR OFF, AIR BRAKE TRIGGERING
-// =======================================================================================================
-//
-
-void engineOnOff() {
-
-  static unsigned long pulseDelayMillis;
-  static unsigned long idleDelayMillis;
-
-  if (engineManualOnOff) { // Engine manually switched on or off depending on presence of servo pulses
-    if (pulseAvailable) pulseDelayMillis = millis(); // reset delay timer, if pulses are available
-
-    if (millis() - pulseDelayMillis > 100) {
-      engineOn = false; // after delay, switch engine off
-    }
-    else engineOn = true;
-  }
-
-  else { // Engine automatically switched on or off depending on throttle position and 15s delay timne
-    if (currentThrottle > 80 || driveState != 0) idleDelayMillis = millis(); // reset delay timer, if throttle not in neutral
-
-    if (millis() - idleDelayMillis > 15000) {
-      engineOn = false; // after delay, switch engine off
-    }
-
-    if (millis() - idleDelayMillis > 10000) {
-      lightsOn = false; // after delay, switch light off
-    }
-
-    // air brake noise trigggering TODO
-    /*if (millis() - idleDelayMillis > 1000) {
-      if (EngineWasAboveIdle) {
-        airBrakeTrigger = true; // after delay, trigger air brake noise
-      }
-      }*/
-
-    // Engine start detection
-    if (currentThrottle > 100 && !airBrakeTrigger) {
-      engineOn = true;
-      lightsOn = true;
-      EngineWasAboveIdle = true;
-    }
-  }
-}
-
-//
-// =======================================================================================================
-// LED
-// =======================================================================================================
-//
-
-void led() {
-
-  // Reversing light ----
-  //if (reversingSoundOn) reversingLight.on();
-  if (engineRunning && escInReverse) reversingLight.on();
-  else reversingLight.off();
-
-  // Beacons (blue light) ----
-  if (sirenOn) {
-    if (doubleFlashBlueLight) {
-      beaconLight2.flash(30, 80, 380, 2); // Simulate double flash lights
-      beaconLight1.flash(30, 80, 400, 2); // Simulate double flash lights
-    }
-    else {
-      beaconLight2.flash(30, 400, 0, 0); // Simulate rotating beacon lights with short flashes
-      beaconLight1.flash(30, 420, 0, 0); // Simulate rotating beacon lights with short flashes
-    }
-  }
-  else {
-    beaconLight2.off();
-    beaconLight1.off();
-  }
-
-  // Headlights, tail lights ----
-  if (lightsOn) {
-    headLight.on();
-    if (escIsBraking) {
-      tailLight.on();  // Taillights (full brightness)
-      brakeLight.on(); // Brakelight on
-    }
-    else {
-      tailLight.pwm(50); // Taillights (reduced brightness)
-      brakeLight.off(); // Brakelight off
-    }
-  }
-  else {
-    headLight.off();
-    tailLight.off();
-    brakeLight.off();
-  }
-
-  if (!hazard) {
-    // Indicators (turn signals, blinkers) ----
-    if (indicatorLon) {
-      if (indicatorL.flash(375, 375, 0, 0)) indicatorSoundOn = true; // Left indicator
-    }
-    else indicatorL.off();
-
-    if (indicatorRon) {
-      if (indicatorR.flash(375, 375, 0, 0)) indicatorSoundOn = true; // Right indicator
-    }
-    else indicatorR.off();
-  }
-  else { // Hazard lights on, if no connection to transmitter (serial control mode only)
-    if (indicatorL.flash(375, 375, 0, 0)) indicatorSoundOn = true;
-    indicatorR.flash(375, 375, 0, 0);
-  }
-
-  // Foglights (serial control mode only) ----
-  if (lightsOn && !mode2) fogLight.on();
-  else fogLight.off();
-
-  // Roof lights (serial control mode only) ----
-  if (lightsOn && !mode1) roofLight.on();
-  else roofLight.off();
-
-  // Sidelights ----
-  if (engineOn) sideLight.on();
-  else sideLight.off();
-
-}
-
-//
-// =======================================================================================================
-// SHAKER (simulates engine vibrations)
-// =======================================================================================================
-//
-
-void shaker() {
-  int32_t shakerRpm;
-
-  // Set desired shaker rpm
-  if (engineRunning) shakerRpm = map(currentRpm, minRpm, maxRpm, shakerIdle, shakerFullThrottle);
-  if (engineStart) shakerRpm = shakerStart;
-  if (engineStop) shakerRpm = shakerStop;
-
-  // Shaker on
-  if (engineRunning || engineStart || engineStop) shakerMotor.pwm(shakerRpm);
-  else shakerMotor.off();
+    
+        
+    
 }
 
 
-//
-// =======================================================================================================
-// ESC CONTROL
-// =======================================================================================================
-//
-
-// If you connect your ESC to pin 33, the vehicle inertia is simulated. Direct brake (crawler) ESC required
-// *** WARNING!! Do it at your own risk!! There is a falisafe function in case, the signal input from the
-// receiver is lost, but if the ESP32 crashes, the vehicle could get out of control!! ***
-
-void esc() {
-  static uint32_t escPulseWidth = 1500;
-  static uint32_t escSignal;
-  static unsigned long escMillis;
-  static unsigned long lastStateTime;
-  static int8_t pulse; // -1 = reverse, 0 = neutral, 1 = forward
-  static int8_t escPulse; // -1 = reverse, 0 = neutral, 1 = forward
-  static int8_t driveRampRate;
-  static int8_t brakeRampRate;
-
-  if (millis() - escMillis > escRampTime) { // About very 2 - 6ms
-    escMillis = millis();
-
-    // calulate throttle dependent brake steps
-    brakeRampRate = map (currentThrottle, 0, 500, 1, escBrakeSteps);
-
-    // Emergency ramp rates for falisafe
-    if (failSafe) {
-      brakeRampRate = escBrakeSteps;
-      driveRampRate = escBrakeSteps;
-    }
-    else driveRampRate = 1;
-
-    // Comparators
-    if (pulseWidth[2] > pulseMaxNeutral[2] && pulseWidth[2] < pulseMaxLimit[2]) pulse = 1; // 1 = Forward
-    else if (pulseWidth[2] < pulseMinNeutral[2] && pulseWidth[2] > pulseMinLimit[2]) pulse = -1; // -1 = Backwards
-    else pulse = 0; // 0 = Neutral
-
-    if (escPulseWidth > pulseMaxNeutral[2] && escPulseWidth < pulseMaxLimit[2]) escPulse = 1; // 1 = Forward
-    else if (escPulseWidth < pulseMinNeutral[2] && escPulseWidth > pulseMinLimit[2]) escPulse = -1; // -1 = Backwards
-    else escPulse = 0; // 0 = Neutral
-
-#ifdef DRIVE_STATE_DEBUG
-    if (millis() - lastStateTime > 300) { // Print the data every 300ms
-      lastStateTime = millis();
-      Serial.println(driveState);
-      Serial.println(pulse);
-      Serial.println(escPulse);
-      Serial.println(escPulseMin);
-      Serial.println(escPulseMax);
-      Serial.println(brakeRampRate);
-      Serial.println("");
-    }
-#endif
-
-    // Drive state state machine
-    switch (driveState) {
-
-      case 0: // Standing still ---------------------------------------------------------------------
-        escIsBraking = false;
-        escInReverse = false;
-        escPulseWidth = pulseZero[2];  // ESC to neutral position
-
-        if (pulse == 1 && engineRunning) driveState = 1; // Driving forward
-        if (pulse == -1 && engineRunning) driveState = 3; // Driving backwards
-        break;
-
-      case 1: // Driving forward ---------------------------------------------------------------------
-        escIsBraking = false;
-        escInReverse = false;
-        if (escPulseWidth < pulseWidth[2]) escPulseWidth += driveRampRate;
-        if (escPulseWidth > pulseWidth[2] && escPulseWidth > pulseZero[2]) escPulseWidth -= driveRampRate;
-
-        if (pulse == -1 && escPulse == 1) driveState = 2; // Braking forward
-        if (pulse == 0 && escPulse == 0) driveState = 0; // standing still
-        break;
-
-      case 2: // Braking forward ---------------------------------------------------------------------
-        escIsBraking = true;
-        escInReverse = false;
-        if (escPulseWidth > pulseZero[2]) escPulseWidth -= brakeRampRate; // brake with variable deceleration
-
-        if (pulse == 0 && escPulse == 1) {
-          driveState = 1; // Driving forward
-          airBrakeTrigger = true;
-        }
-        if (pulse == 0 && escPulse == 0) {
-          driveState = 0; // standing still
-          airBrakeTrigger = true;
-        }
-        break;
-
-      case 3: // Driving backwards ---------------------------------------------------------------------
-        escIsBraking = false;
-        escInReverse = true;
-        if (escPulseWidth > pulseWidth[2]) escPulseWidth -= driveRampRate;
-        if (escPulseWidth < pulseWidth[2] && escPulseWidth < pulseZero[2]) escPulseWidth += driveRampRate;
-
-        if (pulse == 1 && escPulse == -1) driveState = 4; // Braking backwards
-        if (pulse == 0 && escPulse == 0) driveState = 0; // standing still
-        break;
-
-      case 4: // Braking backwards ---------------------------------------------------------------------
-        escIsBraking = true;
-        escInReverse = true;
-        if (escPulseWidth < pulseZero[2]) escPulseWidth += brakeRampRate; // brake with variable deceleration
-
-        if (pulse == 0 && escPulse == -1) {
-          driveState = 3; // Driving backwards
-          airBrakeTrigger = true;
-        }
-        if (pulse == 0 && escPulse == 0) {
-          driveState = 0; // standing still
-          airBrakeTrigger = true;
-        }
-        break;
-
-    } // End of state machine
+void ReadSavedPreferences()
+{
+  Serial.println("reading:");
+  preferences.begin("settings", false);
 
 
-    // ESC control
-    escSignal = map(escPulseWidth, escPulseMin, escPulseMax, 3278, 6553); // 1 - 2ms (5 - 10% pulsewidth of 65534)
-    escOut.pwm(escSignal);
-  }
+  throttleCenter = preferences.getUInt("tC", 1500);
+  neutralUpperOffset = preferences.getUInt("tNUL", 80);
+  neutralLowerOffset = preferences.getUInt("tNLL", 80);
+  throttleFull = preferences.getUInt("tFull", 2000);
+  throttleAxisReversed = preferences.getUInt("trev", 0);
+  reverseType2 = preferences.getUInt("revtype", 1);  
+  //Serial.println(preferences.getUInt("test",9));
+
+  preferences.end();
+  Serial.printf("center:%d  upper:%d  lower:%d  full:%d  reversed:%d revtype:%d\n",throttleCenter,neutralUpperOffset,neutralLowerOffset,throttleFull,throttleAxisReversed,reverseType2);
 }
+//static portMUX_TYPE my_mutex;
+void SavePreferences()
+{
+  //vPortCPUInitializeMutex(&my_mutex);
+  //portENTER_CRITICAL(&my_mutex);
+  timerAlarmDisable(variableTimer);     //core 1 panics if interrupt happens while writing to nvs
+  timerAlarmDisable(fixedTimer);
+  preferences.begin("settings", false);
+
+  Serial.println("saving:");
+  Serial.printf("center:%d  upper:%d  lower:%d  full:%d  reversed:%d revtype:%d\n",throttleCenter,neutralUpperOffset,neutralLowerOffset,throttleFull,throttleAxisReversed,reverseType2);
+
+
+  preferences.putUInt("tC", throttleCenter);
+  preferences.putUInt("tNUL", neutralUpperOffset);
+  preferences.putUInt("tNLL", neutralLowerOffset);
+  preferences.putUInt("tFull", throttleFull);
+  preferences.putUInt("trev", throttleAxisReversed);
+  preferences.putUInt("revtype", reverseType2); 
+  //preferences.putUInt("test",throttleAxisReversed); 
+
+  preferences.end();
+
+  ReadSavedPreferences();
+  
+  timerAlarmEnable(variableTimer);
+  timerAlarmEnable(fixedTimer);
+  //portEXIT_CRITICAL(&my_mutex);
+}
+
+
+
 
 //
 // =======================================================================================================
@@ -1393,22 +1010,59 @@ unsigned long loopDuration() {
 //
 
 void loop() {
+/*
+  #if defined  SERIAL_COMMUNICATION
+    readSerialCommands(); // Serial communication (pin 36)
+    showParsedData();
+  #elif defined PPM_COMMUNICATION
+    readPpmCommands(); // PPM communication (pin 34)
+  #else
+    readSerialCommands2();
+    // measure RC signals mark space ratio
+    readRcSignals();
+  #endif
+  
 
-#if defined  SERIAL_COMMUNICATION
-  readSerialCommands(); // Serial communication (pin 36)
-  showParsedData();
-#elif defined PPM_COMMUNICATION
-  readPpmCommands(); // PPM communication (pin 34)
-#else
-  // measure RC signals mark space ratio
-  readRcSignals();
-#endif
+  #if defined DIRECT_SERIAL_INPUT
+    readSerialCommands2();
+  #elif defined SBUS_INPUT*/
+    //Read from serial port to buffer
+    SBUSinput();
 
+    //if all channels are in and ready
+    if (SBUS.channelsReady)
+    {
+      //SBUSpreparechannels();
+      //SBUSprintstuff();
+      //SBUSpreparechannels_M();  //convert buffer to channels. Called from SBUS_input()
+      SBUS.channelsReady = 0;   
+      SBUSthrottle();           //copy throttle channel to pulseWidth[2]
+      SBUSswitches();           //process horn and siren switches
+      //displayRefresh();
+    }
+  //#else
+    //readRcSignals();
+  //#endif
+
+  if (buttonSetupCalibrationActive)   //buttonSetupCalibration should only run if radio is active, so don't move this to donoradioStuffList
+  {
+    buttonSetupCalibration();
+  }
+
+  readSerialCommands2();        //read inputs from serial port 1. <0,thr,sir,hor,eng> or <1,*config*>
+  serialSwitches();             //set (override) switches based on serial 1 input
+  audioLogic();                 //engine switch and turn off horn and siren if engine off
+  sirenTimerSwitch();           //switch between siren 1 and 2 every x seconds.
+
+  //--
+  //End up here with pulseWidth[2], sirenOn, hornOn, engineOn.
+  //--
+  
   // Horn triggering
-  triggerHorn();
+  //triggerHorn();
 
   // Indicator (turn signal) triggering
-  triggerIndicators();
+  //triggerIndicators();
 }
 
 //
@@ -1420,23 +1074,37 @@ void loop() {
 void Task1code(void *pvParameters) {
   for (;;) {
 
-    // Map pulsewidth to throttle
+    // Map pulsewidth to throttle. Calculate engine volume. 1500-2000 and 1500-1000 to 0-500.
     mapThrottle();
 
-    // Simulate engine mass, generate RPM signal
-    engineMassSimulation();
+    // Simulate engine mass, generate RPM signal. Map throttle 0-500 to interrupt interval.
+    //currentRpmScaled = engineMassSimulation();
+    //currentRpmScaled = map(reMap(curveLinear, currentThrottle), minRpm, maxRpm, maxSampleInterval, minSampleInterval); //this is what actually happens in engineMassSimulation without mass simulation
+    //engineMassSimulation();
+    throttleCalculations(currentThrottle);
+    //Serial.print(throttleAxis);//currentThrottle);
+    //Serial.print('\t');
+    //Serial.println(currentRpmScaled);
 
     // Switch engine on or off
-    engineOnOff();
+    //engineOnOff();
 
     // LED control
-    led();
+    //led();
 
     // Shaker control
-    shaker();
+    //shaker();
 
     // ESC control (Crawler ESC with direct brake on pin 33)
-    esc();
+    // Wombii: some functions moved to logicstuff()
+    //esc();
+
+    //Reverse and brake sounds
+    logicstuff();
+
+    
+
+    
 
     // measure loop time
     loopTime = loopDuration();
