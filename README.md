@@ -17,9 +17,7 @@ Based on v2.4, but updated with v2.5 esc pulse change
 - Moved functions into different files to make the program easier to navigate for humans (or just me)
 - Moved sound files to subfolders for same reason as above
 - engineMassSimulation is split up into 3 sub functions to make testing easier:
- - throttle curve
- - mass simulation
- - convert throttle value to interrupt interval
+throttle curve, mass simulation, convert throttle value to interrupt interval
  
 ## Disabled for now:
  - esc out
