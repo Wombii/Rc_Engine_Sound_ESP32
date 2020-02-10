@@ -23,6 +23,7 @@ throttle curve, mass simulation, convert throttle value to interrupt interval
  - esc out
  - led out
  - shaker out
+ - indicator tick tock sound
  - pwm, ppm and serial in
  
 # --- Original readme below ---
