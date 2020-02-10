@@ -1,3 +1,34 @@
+# Changes by Wombii, Work in progress:
+Based on v2.4, but updated with v2.5 esc pulse change
+## Added:
+ - SBUS input
+ - Simple serial input and calibration change
+ - TTGO_Display tft display
+ - Calibration via button press
+ - 2 Siren sounds (alternating)
+ - Dynamic intro/loop/outro horn (horn sounds for as long as switch is held down)
+ - Second brake sound when applying brakes
+ - Different logic function for reverse and brake sound triggering, separate from other functions
+ 
+## Possibly fixed?:
+ - slow ramping up and down for brake sounds to avoid files having to start and end at -180 without popping
+ 
+## Other changes:
+- Moved functions into different files to make the program easier to navigate for humans (or just me)
+- Moved sound files to subfolders for same reason as above
+- engineMassSimulation is split up into 3 sub functions to make testing easier:
+ - throttle curve
+ - mass simulation
+ - convert throttle value to interrupt interval
+ 
+## Disabled for now:
+ - esc out
+ - led out
+ - shaker out
+ - pwm, ppm and serial in
+ 
+# --- Original readme below ---
+
 # This is an Arduino RC engine sound generator for ESP32
 It's based on the ATmega 328 version: https://github.com/TheDIYGuy999/Rc_Engine_Sound
 and on bitlunis Halloween example: https://github.com/bitluni/MotionPumpkin
@@ -147,10 +178,6 @@ and on bitlunis Halloween example: https://github.com/bitluni/MotionPumpkin
 ## New in V 2.4:
 - Bug fixed: direct transition from state "braking backwards" to "driving backwards" now working
 - failsafe function for serial signal added. Emergency brake is triggered in case of RC signal loss (serial & PWM mode only, PPM will follow)
-
-## New in V 2.5:
-- 3rd brake light on pin 32 added
-- "escPulseSpan" > 1400 now working properly. Allows to accelerate and decelerate even smoother as well as limiting the top speed to a realistic level
 
 ## On the todo list:
 - solving ticking noise issue in serial communication mode
