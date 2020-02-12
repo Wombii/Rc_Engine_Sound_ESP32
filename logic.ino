@@ -195,7 +195,7 @@ void logicstuff()
 }
 
 void SBUSthrottle (void){
-  pulseWidth[2] = map(SBUS.channels[0],1000,2000,0,2000);
+  pulseWidth[2] = map(SBUS.channels[0],0,2000,1000,2000);
   
 }
 
@@ -306,7 +306,7 @@ void sirenTimerSwitch (void)
     sirenTime = millis();
   }
 
-  //soundNo = 1+sirenNumber;  // 1 = siren
+  soundNo = 1+sirenNumber;  // 1 = siren
 }
 
 

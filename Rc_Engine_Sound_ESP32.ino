@@ -64,7 +64,7 @@ Preferences preferences;
 // ------------------------------------------------------------------------------------
 
 
-#define TFT_DISPLAY 1
+//#define TFT_DISPLAY 1
 #if defined TFT_DISPLAY
   #include <TFT_eSPI.h> // Graphics and font library for ILI9341 driver chip
   
@@ -503,7 +503,7 @@ void IRAM_ATTR fixedPlaybackTimer() {
   static uint32_t curSound1Sample;              // Index of currently loaded sound1 sample
   static uint32_t curReversingSample;           // Index of currently loaded reversing beep sample
   static uint32_t curIndicatorSample;           // Index of currently loaded indicator tick sample
-  static int32_t a, b, b1, b2;                 // Two input signals for mixer: a = horn or siren, b = reversing sound, indicator sound
+  static int32_t a, b, b1, b2,c;                 // Two input signals for mixer: a = horn or siren, b = reversing sound, indicator sound
 
   static uint8_t hornsequence = 0;
 
@@ -717,12 +717,15 @@ void IRAM_ATTR fixedPlaybackTimer() {
 
   // Mixing "b1" + "b2" together ----
   //b = (b1 + b2 - b1 * b2 / 255);
-  b = b1 + b2 / 2;
+  //b = b1 + b2 / 2;
+  c = a + b1 / 2;
 
   // DAC output (groups a + b mixed together) ----------------------------------------------------
 
   //dacWrite(DAC2, (int) (a + b - a * b / 255)); // Write mixed output signals to DAC: http://www.vttoth.com/CMS/index.php/technical-notes/68
-  dacWrite(DAC2, (int) ((a + b) / 2)); // Write mixed output signals to DAC
+  //dacWrite(DAC2, (int) ((a + b) / 2)); // Write mixed output signals to DAC
+  dacWrite(DAC2, (int) ((c + b2) / 2)); // Write mixed output signals to DAC
+
 
   portEXIT_CRITICAL_ISR(&fixedTimerMux);
 }
@@ -1039,6 +1042,8 @@ void loop() {
       SBUSthrottle();           //copy throttle channel to pulseWidth[2]
       SBUSswitches();           //process horn and siren switches
       //displayRefresh();
+      //Serial.println(SBUS.channels[0]);
+      //Serial.println(pulseWidth[2]);
     }
   //#else
     //readRcSignals();
@@ -1050,7 +1055,7 @@ void loop() {
   }
 
   readSerialCommands2();        //read inputs from serial port 1. <0,thr,sir,hor,eng> or <1,*config*>
-  serialSwitches();             //set (override) switches based on serial 1 input
+  //serialSwitches();             //set (override) switches based on serial 1 input
   audioLogic();                 //engine switch and turn off horn and siren if engine off
   sirenTimerSwitch();           //switch between siren 1 and 2 every x seconds.
 
@@ -1063,6 +1068,9 @@ void loop() {
 
   // Indicator (turn signal) triggering
   //triggerIndicators();
+  //Serial.printf("ignCh: %d\t eOn: %d\t estate: %d\n",SBUS.channels[9-1],engineOn,engineState);
+  Serial.printf("audioCh: %d\t hornSwitch: %d\t sirenSwitch: %d\t hornOn: %d\t sirenOn: %d\t soundNo: %d\n",SBUS.channels[12-1],hornSwitch,sirenSwitch,hornOn,sirenOn,soundNo);
+  //Serial.println(engineOn);
 }
 
 //

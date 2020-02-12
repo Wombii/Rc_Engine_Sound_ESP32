@@ -79,7 +79,7 @@ volatile int hornVolumePercentage = 100; // Adjust the horn volume (usually = 10
 //#include "PeterbiltHorn.h" // A Peterbilt truck horn
 
 // Choose the siren / additional horn sound (uncomment the one you want) --------
-volatile int sirenVolumePercentage = 50; // Adjust the siren volume (usually = 100%, never more!)
+volatile int sirenVolumePercentage = 80; // Adjust the siren volume (usually = 100%, never more!)
 //#include "UsPoliceSiren.h" // US Police siren
 //#include "sounds/FireTruckAirSiren.h" // US fire truck air siren
 //#include "FeuerwehrMartinshorn.h" // European Feuerwehr Martinshorn
@@ -87,7 +87,7 @@ volatile int sirenVolumePercentage = 50; // Adjust the siren volume (usually = 1
 //#include "PostAutoHorn.h" // The typical Swiss post bus horn
 #include "usersounds/siren01norskere22.h"
 
-volatile int siren2VolumePercentage = 50; // Adjust the siren volume (usually = 100%, never more!)
+volatile int siren2VolumePercentage = 80; // Adjust the siren volume (usually = 100%, never more!)
 #include "usersounds/siren02Norsk.h"
 
 // Choose the air brake release sound (uncomment the one you want) --------
@@ -147,7 +147,7 @@ const uint8_t shakerStop = 60; // Shaker power while engine stop (max. 255, abou
 
 // Engine parameters ----------------------------------------------------------------------------------------------------
 //Activate for "engine on off" functionality in combination with "Micro RC" Receiver from TheDIYGuy999. No Pulse Zero auto calibration in this case!!
-const boolean engineManualOnOff = false;
+const boolean engineManualOnOff = true;
 
 // Engine RPM range (2 for big Diesels, 4 for fast running motors)
 const uint32_t TOP_SPEED_MULTIPLIER = 2; // RPM multiplier: the bigger the number, the larger the rev range, 2 - 4 is a good place to start. ESP32 will crash, if > 5 @ 22'050Hz!
