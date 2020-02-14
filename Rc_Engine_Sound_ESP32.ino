@@ -356,6 +356,10 @@ void IRAM_ATTR variablePlaybackTimer() {
       }
 
       // Air brake release sound, triggered after stop
+
+      // If I understand correctly, there is a popping sound if b goes directly from 0 to 128, and the original sound files fixes this
+      // by starting and ending at -128. To avoid having to modify the soundfiles, I ramp up and down b at the start and end when necessary.
+      
       if (airBrakeTrigger) {
         airPuffTrigger = false;
         if (curBrakeSample == 0){           //fix popping if soundfile doesn't start at -128. -W
@@ -513,7 +517,11 @@ void IRAM_ATTR fixedPlaybackTimer() {
 
     // Group "a" (never more than one active at a time) ----------------------------------------------
 
-    case 2: // Horn "a" ----
+    // Modified to alternate between two siren sounds.
+
+    // soundNo=1 and soundNo=2 selects between the two siren sounds.
+
+    case 2: // Siren sound 2
       fixedTimerTicks = 4000000 / siren2SampleRate; // our fixed sampling rate
       timerAlarmWrite(fixedTimer, fixedTimerTicks, true); // // change timer ticks, autoreload true
       curSirenSample = 0;
@@ -532,7 +540,7 @@ void IRAM_ATTR fixedPlaybackTimer() {
       }
       break;
 
-    case 1: // Siren "a" ----
+    case 1: // Siren sound 1
       fixedTimerTicks = 4000000 / sirenSampleRate; // our fixed sampling rate
       timerAlarmWrite(fixedTimer, fixedTimerTicks, true); // // change timer ticks, autoreload true
       //curHornSample = 0;
@@ -630,9 +638,11 @@ void IRAM_ATTR fixedPlaybackTimer() {
         hornsequence 0
 */
   //  Looping horn -W
+  //  Always plays start of file and end of file, but also loops the middle for as long as the switch is held.
+
   //  plays the start of the file, then loops the middle of the file and ends with the end of the file
-  #define HORNLOOPSTART 8000    
-  #define HORNLOOPEND   12000
+  #define HORNLOOPSTART 8000     //Sample number that marks start of looping section
+  #define HORNLOOPEND   12000    //Sample number that marks end of looping section
   if (hornOn) {
     switch(hornsequence){
       case 0:
@@ -718,7 +728,7 @@ void IRAM_ATTR fixedPlaybackTimer() {
   // Mixing "b1" + "b2" together ----
   //b = (b1 + b2 - b1 * b2 / 255);
   //b = b1 + b2 / 2;
-  c = a + b1 / 2;
+  c = a + b1 / 2; //W: A different volume balance. 
 
   // DAC output (groups a + b mixed together) ----------------------------------------------------
 
@@ -940,7 +950,7 @@ void setup() {
     
 }
 
-
+// Read variables saved to non-volatile memory
 void ReadSavedPreferences()
 {
   Serial.println("reading:");
@@ -958,6 +968,10 @@ void ReadSavedPreferences()
   preferences.end();
   Serial.printf("center:%d  upper:%d  lower:%d  full:%d  reversed:%d revtype:%d\n",throttleCenter,neutralUpperOffset,neutralLowerOffset,throttleFull,throttleAxisReversed,reverseType2);
 }
+
+// Save variables to non-volatile memory
+// This fails with a core panic if an interrupt happens while writing, so we have to disable interrupts temporarily.
+// I'm no expert, but read that mutex would work. It didn't. timerAlarmDisable worked for me though.
 //static portMUX_TYPE my_mutex;
 void SavePreferences()
 {

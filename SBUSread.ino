@@ -1,13 +1,45 @@
 /*
  * SBUS reading by Wombii
- * Simple SBUS data read and process using a union+struct to process raw serial data into channel values.
+ * 
+ * Serial.begin(100000)
+ * 
+ * The data stream from the receiver is 25 bytes of serial data at 100K baudrate. Repeats every x ms (5-20ms?)
+ * This data contains 16 analog channels, 2 digital channels and frame lost + failsafe info.
+ * 
+ * byte 1 and 25 is startframe (0x0F) and endframe (0x00)
+ * byte 24 is d17, d18, frame lost, failsafe (1 bit each)
+ * byte 2-23 is 16 analog channels (11 bits each)
+ * 
+ * How to use, insert this in the main loop:
+
+  SBUSinput();  //Should be called more frequently than the receiver sends a full data set.
+                //When a full data set is received, SBUS.channelsReady will be 1 or true and channels updated in the SBUS. struct.
+
+    //if all channels are in and ready:
+    if (SBUS.channelsReady)
+    {
+      //SBUSpreparechannels_M();  //convert buffer to channels. Now called directly from SBUSinput().
+      SBUS.channelsReady = 0;     //reset the channelsReady flag.
+
+      //Do stuff with the updated channel info:
+      SBUSthrottle();             //copy throttle channel to pulseWidth[2]
+      SBUSswitches();             //process horn and siren switches
+    }
+
+ * SBUS.channels[0] to SBUS.channels[15] contains data for the 16 analog channels. CAUTION: (frSky) SBUS channels use 0-2000, not 1000-2000us
+ * map(SBUS.channels[0],0,2000,1000,2000) will work to convert it to traditional pwm values.
+ * 
+ * SBUS.failsafe will be //TODO: insert correct value here// when receiver reports loss of comms with transmitter.
+ * 
+ * Use SBUSprintstuff() to print out all processed SBUS data to the serial monitor.
  */
 
  
 /*
 #define sbusdebug 1
 
-//union+struct works fine on atmega arduinos, but not ESP32
+//union+struct works fine on atmega arduinos, but not ESP32. 
+//save the incoming buffer to tempArray[25] and read out SBUShelper.pieces.ch1 - ch16 or SBUShelper.pieces.failsafe
 union SBUSconverter
   {
     struct
@@ -48,43 +80,9 @@ struct sbusdata
 */
 
 
-/*
-0000 0000
-&
-0000 0001 digital 17
-0000 0010 digital 18
-0000 0100 if this is 1: signal lost
-0000 1000 if this is 1: signal failsafe
-*/
-//uint8_t inputArray[25] = { 0x0f,0x01,0x04,0x20,0x00,0xff,0x07,0x40,0x00,0x02,0x10,0x80,0x2c,0x64,0x21,0x0b,0x59,0x08,0x40,0x00,0x02,0x10,0x80,0x00,0x00};
-//uint8_t inputArray[25] = { 0x01,0x04,0x22,0x00,0x92,0x0f,0x40,0x00,0x02,0x10,0x80,0x2c,0x64,0x21,0x0b,0x59,0x08,0x40,0x00,0x02,0x10,0x80,0x00,0x00,0x0f};
-   
 
-
-/*
-void loop() {
-  // put your main code here, to run repeatedly:
-
-
-static unsigned long sendtime = 0;
-if (millis() - sendtime > 20)
-{
-  for(byte i=0; i<25; i++) //send sbus on port 1
-    {
-      Serial1.print((char)inputArray[i]);
-    }
-  sendtime = millis();
-}
-  
-#if sbusdebug
-Serial.print("A:");
-Serial.println(SBUSserial.available());
-#endif
-SBUSinput();
-delay(5);
-}
-*/
-
+//There is a failsafe bit in the SBUS stream. That bit is set by the receiver if it loses contact with the transmitter.
+//This is a function to set another failsafe state if the microcontroller is not receiveing data from the receiver.
 void SBUSfailsafeTimeout(unsigned long failsafeTimeoutTimer, unsigned long timeoutDuration)
 {
   //static unsigned long failsafeTimeoutStore = 0;
@@ -95,6 +93,8 @@ void SBUSfailsafeTimeout(unsigned long failsafeTimeoutTimer, unsigned long timeo
   }
 }
 
+
+//Read the serial stream from receiver.
 void SBUSinput(void)
 {
   static byte state = 1;
@@ -102,16 +102,21 @@ void SBUSinput(void)
   //Serial.println("s:");
   switch (state)
   {
-      
+    
+    //If the serial rx hardware buffer is full, we get useless data because it may overwrite parts of a data set.
+    //First empty the buffer if it is full.
+    //If SBUSinput() is not called frequently enough, this is most likely where the SBUS reading will fail.
     case 1:
-      SBUS.tempArray[24] = 1; //break the endframe in tempArray to be able to test it in stage 3.
-      //If the serial rx buffer is full, we get useless data.
-      if (SBUSserial.available() > 53)
+      SBUS.tempArray[24] = 1;                           //Break the endframe in tempArray to be able to test for a good endframe in stage 3.
+      
+      //If hardware buffer contains too many bytes...
+      if (SBUSserial.available() > 53)                  //53 for arduino mega, not sure how large the esp32 buffer is.
       {
         #if sbusdebug 
         Serial.print("buffer full"); 
         #endif
-        while(SBUSserial.available())
+        //...read until the buffer is empty. 
+        while(SBUSserial.available()) 
         {
           SBUSserial.read();
           
@@ -120,37 +125,40 @@ void SBUSinput(void)
         Serial.println(".k");
         #endif
       }
-      //Read until we find the startframe
+      //Else, read until we find the startframe 0x0F...
       if (SBUSserial.available() )
       {
         while(SBUSserial.available())
         {
           readbyte = SBUSserial.read();
           //Serial.println(readbyte,HEX);
-          //Serial.println(readbyte,HEX);
           if (readbyte == 0x0F)
           {
+            //... and save the next byte in the first spot of the input array.
             SBUS.tempArray[0] = readbyte;
             state = 2;
             break;
           }
         }
-        //else
-          //state = 1;
+        
       }
       
       break;
 
+    //If we have found a startbyte and have read the first data byte, keep reading and saving!
     case 2:
-      //Serial.print("s2:");
+      
       static byte i = 1;
+      //Keep reading and saving data to the input array for as long as there is data in the hardware buffer
       while (SBUSserial.available() )
       {
         readbyte = SBUSserial.read();
         
+        //Until we've read all 25 bytes
         SBUS.tempArray[i++] = readbyte;
         if (i >= 25)
         {
+          //Then exit and goto stage 3
           i = 1;
           state = 3;
           break;
@@ -159,11 +167,12 @@ void SBUSinput(void)
       break;
 
     case 3:
-      //If it seems like a good full read
+      //If it seems like a good full read (endframe is expected to be 0x00)
       if (SBUS.tempArray[24] == 0)
       {
-        SBUS.failsafe = 0;
-        SBUSpreparechannels_M();
+        //Do the things. Either set channelsReady = 1 here, or go directly to data processing.
+        SBUS.failsafe = 0;            //Clearing the failsafe state in case it's been set by the timeout function.
+        SBUSpreparechannels_M();      //Process the data set into channels (11 bits per channel)
         #if sbusdebug
         SBUSprintstuff();
         #endif
@@ -171,17 +180,6 @@ void SBUSinput(void)
       //if the endframe doesn't match a good full read
       else
       {
-        #if sbusdebug
-        Serial.println("SBUS ENDFRAME FAIL");
-        Serial.print("input:");
-        for(byte i=0; i<25; i++)
-        {
-          Serial.print(SBUS.tempArray[i],HEX);
-          Serial.print(",");
-          //Serial1.write(timingArray[0][0][i]); //sends bytevalues to app
-        }
-        Serial.println("/input");
-        #endif
         SBUSserial.read(); //read one byte in attempt to catch up to pattern.
       }
       state = 1;
@@ -191,126 +189,30 @@ void SBUSinput(void)
 }
 
 
-uint8_t arrayDummyRead()
-{
-  static byte i = 0;
-  byte value = 0;
-
-  value = inputArray[i++];
-  if (i == 25)
-    i = 0;
-  return value;
-}
-
-void SBUSinputTest(void)
-{
-  static byte state = 1;
-  byte readbyte = 0;
-  Serial.print("s:");
-  Serial.println(state);
-  switch (state)
-  {
-      
-    case 1:
-      SBUS.tempArray[24] = 1; //break the endframe in tempArray to be able to test it in stage 3.
-      //If the serial rx buffer is full, we get useless data.
-      if (0)//SBUSserial.available() > 53)
-      {
-        #if sbusdebug 
-        Serial.print("buffer full"); 
-        #endif
-        while(SBUSserial.available())
-        {
-          SBUSserial.read();
-          
-        }
-        #if sbusdebug
-        Serial.println(".k");
-        #endif
-      }
-      
-      //Read until we find the startframe
-      if (1)//SBUSserial.available() )
-      {
-        byte i = 10;
-        while(i)//SBUSserial.available())
-        {
-          readbyte = arrayDummyRead();
-          Serial.println(readbyte,HEX);
-          if (readbyte == 0x0F)
-          {
-            Serial.println("START");
-            SBUS.tempArray[0] = readbyte;
-            state = 2;
-            break;
-          }
-          i--;
-        }
-        //else
-          //state = 1;
-      }
-      
-      
-      break;
-
-    case 2:
-      //Serial.print("s2:");
-      static byte i = 1;
-      //while (SBUSserial.available() )
-      //{
-        readbyte = arrayDummyRead();
-        SBUS.tempArray[i++] = readbyte;
-        if (i >= 25)
-        {
-          i = 1;
-          state = 3;
-          break;
-        }
-      //}
-      break;
-
-    case 3:
-    
-      //If it seems like a good full read
-      if (SBUS.tempArray[24] == 0)
-      {
-        SBUS.failsafe = 0;
-        SBUSpreparechannels_M();
-        #if sbusdebug
-        SBUSprintstuff();
-        #endif
-      }
-      //if the endframe doesn't match a good full read
-      else
-      {
-        #if sbusdebug
-        Serial.println("SBUS ENDFRAME FAIL");
-        Serial.print("input:");
-        for(byte i=0; i<25; i++)
-        {
-          Serial.print(SBUS.tempArray[i],HEX);
-          Serial.print(",");
-          //Serial1.write(timingArray[0][0][i]); //sends bytevalues to app
-        }
-        Serial.println("/input");
-        #endif
-        arrayDummyRead(); //read one byte in attempt to catch up to pattern.
-      }
-      state = 1;
-      break;
-  }
-  
-}
-
 //Based on SBUS library from
 //https://github.com/mikeshub/FUTABA_SBUS
+
+//A good explanation of this method here: http://www.robotmaker.eu/ROBOTmaker/quadcopter-3d-proximity-sensing/sbus-graphical-representation
+
+//tempArray contains 24 bytes of data (8x24 bits), but we need to pull out 16x11 bits for 16 analog channels + 1 byte (8 bits) for d17,d18,failsafe.
+//This is not straight forward as the data bytes arrive with their most significant bytes first, but the 11 bit channel "bytes" are little endian, so we have to 
+//do some backwards trickery. 
+//Channel 1 use all 8 bits of the first byte + 3 bits of the second byte. Move the right-most 3 bits of byte 2 to the left and
+//place them in front of byte 1, then read these 11 bytes as one number.
+// aaaaaaaa cccccbbb
+// bbbaaaaaaaa = channel 1
+//Channel 2 use the next 5 bits of byte 2 and move them to the right, then the right-most 6 bits of byte 3 and move them left to the front.
+// cccccbbb eedddddd
+// ddddddccccc == channel 2
+//For the Arduino Mega I was able to use a union+struct bitfield combination, but for a portable version, this seems to be the way to do it:
+
 void SBUSpreparechannels_M()
 {
   #if sbusdebug 
   Serial.print("channels: ");
   #endif
 
-  SBUS.channelsReady = 1;
+  SBUS.channelsReady = 1; //Channels are updated and ready to use.
 
 
   SBUS.channels[0]  = ((SBUS.tempArray[1]|SBUS.tempArray[2]<< 8) & 0x07FF);
@@ -345,6 +247,7 @@ void SBUSpreparechannels_M()
     SBUS.channels[17] = 0;
   }
 
+  //2 of the bits from the last data byte contain framelost and failsafe
   SBUS.failsafe = SBUS.tempArray[23] & (3<<2);
 
 
@@ -352,48 +255,9 @@ void SBUSpreparechannels_M()
 }
 
 
-
+//print all 16 channels, then digital bits and failsafe.
 void SBUSprintstuff(){
-/*
-  Serial.println("input");
-    for(byte i=0; i<23; i++)
-  {
-    Serial.print(SBUShelper.tempArray[i],HEX);
-    Serial.print(",");
-    //Serial1.write(timingArray[0][0][i]); //sends bytevalues to app
-  }*/
-/*
-  Serial.println("struct");
-  Serial.print('\n');
-  Serial.print(SBUShelper.pieces.ch1);
-  Serial.print(",");
-  Serial.print(SBUShelper.pieces.ch2);
-  Serial.print(",");
-  Serial.print(SBUShelper.pieces.ch3);
-  Serial.print(",");
-  Serial.print(SBUShelper.pieces.ch4);
-  Serial.print(",");
-  Serial.print(SBUShelper.pieces.ch5);
-  Serial.print(",");
-  Serial.print(SBUShelper.pieces.ch6);
-  Serial.print(",");
-  Serial.print(SBUShelper.pieces.failsafe);
-  Serial.print(",");
-  Serial.print(SBUShelper.pieces.d17);
-  Serial.println(",");
 
-  Serial.println("bitshift");
-  int16_t test1;
-  int16_t test2;
-  test1 = ((inputArray[0]|inputArray[1]<< 8) & 0x07FF);
-  test2 = ((inputArray[11]|inputArray[12]<< 8) & 0x07FF);
-  Serial.print( test1 );
-  Serial.print(",");
-  Serial.print( test2 );
-  Serial.println(",");
-*/
-  
-  
 
   for(byte i=0; i<15; i++)
   {

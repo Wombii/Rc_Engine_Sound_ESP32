@@ -23,7 +23,7 @@ void logicstuff()
     // |  brake    | neutral | forward
     // | reverse   |
     //-------------------------------------------------------------------------------
-    byte forwardFlag = 0, brakeFlag = 0, reverseFlag = 0, neutralFlag = 0; //nullstilles hver gang????? arduino ide setter static hvis ikke = 0?
+    byte forwardFlag = 0, brakeFlag = 0, reverseFlag = 0, neutralFlag = 0; 
 
     throttleAxis = pulseWidth[2];
 
