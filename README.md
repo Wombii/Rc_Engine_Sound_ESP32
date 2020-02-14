@@ -11,7 +11,7 @@ Based on v2.4, but updated with v2.5 esc pulse change
  - Different logic function for reverse and brake sound triggering, separate from other functions
  
 ## Possibly fixed?:
- - slow ramping up and down for brake sounds to avoid files having to start and end at -180 without popping
+ - slow ramping up and down for brake sounds to avoid files having to start and end at -128 without popping
  
 ## Other changes:
 - Moved functions into different files to make the program easier to navigate for humans (or just me)
