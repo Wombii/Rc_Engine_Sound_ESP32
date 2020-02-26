@@ -30,6 +30,8 @@
 // All the required vehicle specific settings are done in Adjustments.h!
 #include "Adjustments.h" // <<------- ADJUSTMENTS TAB
 
+#include "AAglobals.h"
+
 // DEBUG options can slow down the playback loop! Only comment them out for debugging
 //#define DEBUG // uncomment it for general debugging informations
 //#define SERIAL_DEBUG // uncomment it to debug the serial command interface on pin 36
@@ -46,10 +48,7 @@
 #include "curves.h" // load nonlinear throttle curve arrays
 //#include <statusLED.h> // https://github.com/TheDIYGuy999/statusLED <<------- Install the newest version!
 
-#include <Preferences.h>
 
-/* create an instance of Preferences library */
-Preferences preferences;
 
 //
 // =======================================================================================================
@@ -64,12 +63,7 @@ Preferences preferences;
 // ------------------------------------------------------------------------------------
 
 
-//#define TFT_DISPLAY 1
-#if defined TFT_DISPLAY
-  #include <TFT_eSPI.h> // Graphics and font library for ILI9341 driver chip
-  
-  TFT_eSPI tft = TFT_eSPI();  // Invoke library
-#endif
+
 // Serial command pins (active, if "SERIAL_COMMUNICATION" in Adjustments.h is not commented out)
 // see "sendSerialCommands()" in Micro RC Receiver code: https://github.com/TheDIYGuy999/Micro_RC_Receiver
 // This is still experimental! It works, but the sound quality is not perfect.
@@ -123,33 +117,9 @@ statusLED shakerMotor(false);
 statusLED escOut(false);
 */
 
-#define SBUSserial Serial2
-#define HUMANSERIAL Serial
 
 // Define global variables
 
-byte buttonSetupCalibrationActive = 0;
-
-struct sbusdata
-{
-  unsigned int channels[18];
-  uint8_t failsafe;
-  byte channelsReady = 0;
-  byte centerValuesSaved = 0;
-  byte tempArray[25];
-} SBUS;
-
-struct remoteconfig
-{
-  int Neutral;
-  int UpperNeutral;
-  int LowerNeutral;
-  int Max;
-  int AxisReversed;
-  int reverseType2;
-} throttleSettings;
-
-uint8_t inputArray[25] = { 0xF,0xFF,0xFB,0xDF,0xFF,0xFE,0xF7,0xBF,0xFF,0xFD,0xEF,0x7F,0xFF,0xFB,0xDF,0xFF,0xFE,0xF7,0xBF,0xFF,0xFD,0xEF,0x7F,0x9,0x0 };
 
 boolean serialInit = false;
 
@@ -219,31 +189,6 @@ boolean hazard;
 boolean left;
 boolean right;
 
-// - W
-int32_t throttleAxis;                                  // Temporary variables for serial command parsing (for signals from "Micro RC" receiver)
-int32_t hornAxis;                                  // See: https://github.com/TheDIYGuy999/Micro_RC_Receiver
-int32_t sirenAxis;
-int32_t ignitionAxis = 1;
-
-
-  byte throttleAxisReversed = 1;          //User setting. Overwritten by value stored in eeprom. Set in buttonSetupMenu.
-  //byte steeringAxisReversed = 0;          //User setting. Overwritten by value stored in eeprom. Set in buttonSetupMenu.
-
-  byte reverseType2 = 1;                  //User setting. Overwritten by value stored in eeprom, need a way to change it. Delayed or double pump reverse. 
-
-  int neutralUpperOffset = 80;           //User setting. Overwritten by value stored in eeprom, need a way to change it. Dead band setting for throttle.
-  int neutralLowerOffset = 80;           //User setting. Overwritten by value stored in eeprom, need a way to change it. Dead band setting for throttle.
-  
-  int throttleNeutralUpperLimit = 1440;   //Calculated on startup.
-  int throttleNeutralLowerLimit = 1415;   //Calculated on startup.
-  int throttleCenter = 1430;              //Recorded on startup.
-  int throttleFull = 1800;                //Used for soundmodule? Set in buttonSetupMenu.
-
-  //int steeringCenter = 1500;              //Recorded on startup. 
-
-  byte reverseDelayTicks = 200;
-
-// - 
 
 
 const int32_t maxRpm = 500;                     // always 500
@@ -641,8 +586,8 @@ void IRAM_ATTR fixedPlaybackTimer() {
   //  Always plays start of file and end of file, but also loops the middle for as long as the switch is held.
 
   //  plays the start of the file, then loops the middle of the file and ends with the end of the file
-  #define HORNLOOPSTART 8000     //Sample number that marks start of looping section
-  #define HORNLOOPEND   12000    //Sample number that marks end of looping section
+  #define HORNLOOPSTART hornSampleCount/3 //8000     //Sample number that marks start of looping section
+  #define HORNLOOPEND   hornSampleCount/2 //10000    //Sample number that marks end of looping section
   if (hornOn) {
     switch(hornsequence){
       case 0:
@@ -800,7 +745,7 @@ void setup() {
   pinMode(SERVO3_PIN, INPUT_PULLDOWN);
   //pinMode(SERVO4_PIN, INPUT_PULLDOWN);
 
-  pinMode(35,INPUT_PULLDOWN); //GPIO 35 button on TTGO_display esp32 module
+  pinMode(35,INPUT);//_PULLDOWN); //GPIO 35 button on TTGO_display esp32 module
 
   pinMode(PPM_PIN, INPUT_PULLDOWN);
 /*
@@ -823,7 +768,7 @@ void setup() {
   // Serial setup
   Serial.begin(115200); // USB serial
 
-  Serial2.begin(100000, SERIAL_8N1, 17,33);
+  Serial2.begin(100000, SERIAL_8N1, 17,33,true); //true = inverted serial
 
 //#ifdef SERIAL_COMMUNICATION
 //  Serial2.begin(115200, SERIAL_8N1, COMMAND_RX, COMMAND_TX);
@@ -890,7 +835,7 @@ void setup() {
 
 #if defined TFT_DISPLAY
   tft.init();
-  tft.setRotation(2);
+  tft.setRotation(1);
   tft.fillScreen(0x5AEB);//TFT_GREY);
 #endif
 
@@ -1056,8 +1001,16 @@ void loop() {
       SBUSthrottle();           //copy throttle channel to pulseWidth[2]
       SBUSswitches();           //process horn and siren switches
       //displayRefresh();
-      //Serial.println(SBUS.channels[0]);
       //Serial.println(pulseWidth[2]);
+
+      #if defined TFT_DISPLAY
+        tft.setCursor(0, 0, 2);
+        tft.print("thrESC:");
+        tft.print(map(SBUS.channels[channelThrottleESC-1],0,2000,1000,2000));
+        tft.print("thrAudio:");
+        tft.print(map(SBUS.channels[channelThrottleAudio-1],0,2000,1000,2000));
+      #endif
+  
     }
   //#else
     //readRcSignals();
@@ -1083,7 +1036,7 @@ void loop() {
   // Indicator (turn signal) triggering
   //triggerIndicators();
   //Serial.printf("ignCh: %d\t eOn: %d\t estate: %d\n",SBUS.channels[9-1],engineOn,engineState);
-  Serial.printf("audioCh: %d\t hornSwitch: %d\t sirenSwitch: %d\t hornOn: %d\t sirenOn: %d\t soundNo: %d\n",SBUS.channels[12-1],hornSwitch,sirenSwitch,hornOn,sirenOn,soundNo);
+  //Serial.printf("audioCh: %d\t hornSwitch: %d\t sirenSwitch: %d\t hornOn: %d\t sirenOn: %d\t soundNo: %d\n",SBUS.channels[12-1],hornSwitch,sirenSwitch,hornOn,sirenOn,soundNo);
   //Serial.println(engineOn);
 }
 
@@ -1097,32 +1050,40 @@ void Task1code(void *pvParameters) {
   for (;;) {
 
     // Map pulsewidth to throttle. Calculate engine volume. 1500-2000 and 1500-1000 to 0-500.
-    mapThrottle();
+      //mapThrottle();
+
+    //Automatic gear simulation. Reads radio input and generates engineRPM, shaftRPM, gear and ESCspeed
+      gearSim();
 
     // Simulate engine mass, generate RPM signal. Map throttle 0-500 to interrupt interval.
-    //currentRpmScaled = engineMassSimulation();
-    //currentRpmScaled = map(reMap(curveLinear, currentThrottle), minRpm, maxRpm, maxSampleInterval, minSampleInterval); //this is what actually happens in engineMassSimulation without mass simulation
-    //engineMassSimulation();
-    throttleCalculations(currentThrottle);
-    //Serial.print(throttleAxis);//currentThrottle);
-    //Serial.print('\t');
-    //Serial.println(currentRpmScaled);
+      //engineMassSimulation();
+
+
+
+    //throttleCalculations replaces engineMassSimulation
+    //It does the same thing, but split up.
+    //Only use one of the following:
+      //throttleCalculations(currentThrottle);                //requires mapThrottle() to run first.
+      throttleCalculations2(currentGlobalEngineRPM);          //replace mapThrottle() with gearSim() if using this.
+    
 
     // Switch engine on or off
-    //engineOnOff();
+      //engineOnOff();
 
     // LED control
-    //led();
+      //led();
 
     // Shaker control
-    //shaker();
+      //shaker();
 
     // ESC control (Crawler ESC with direct brake on pin 33)
     // Wombii: some functions moved to logicstuff()
-    //esc();
+      //esc();
 
     //Reverse and brake sounds
-    logicstuff();
+      logicstuff();
+
+      
 
     
 

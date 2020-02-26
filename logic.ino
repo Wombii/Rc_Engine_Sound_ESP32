@@ -1,18 +1,9 @@
-//SBUS channels
 
- #define channelTurnSignals       4
- #define channelEMFLashers        10 //9
- #define channelHeadlights        5 //6
- #define channelHeadlightstoggle  6 //3
- #define channelFullBeam2         7
- #define channelFloodLights       8 //11
- #define channelIgnition          9 //8
- #define channelAmberflash        11
- #define channelAudioSwitch       12 //14
 
  byte ignitionState = 0;
  byte sirenNumber = 0;
 
+//Deals with setting brake and reverse states. Supports double pump F/B/R ESC type and Direct/delayed F/B/R reverse type.
 void logicstuff()
 {
 
@@ -25,7 +16,8 @@ void logicstuff()
     //-------------------------------------------------------------------------------
     byte forwardFlag = 0, brakeFlag = 0, reverseFlag = 0, neutralFlag = 0; 
 
-    throttleAxis = pulseWidth[2];
+    //changed to local. Reads SBUS channel to throttle info, but can read pulseWidth[2] instead.
+    int throttleAxis = map(SBUS.channels[channelThrottleESC-1],0,2000,1000,2000);//pulseWidth[2];
 
     if (throttleAxisReversed)
     {
@@ -194,11 +186,15 @@ void logicstuff()
     
 }
 
+
+//Save SBUS throttle channel as pulseWidth[2]
 void SBUSthrottle (void){
-  pulseWidth[2] = map(SBUS.channels[0],0,2000,1000,2000);
+  pulseWidth[2] = map(SBUS.channels[channelThrottleAudio-1],0,2000,1000,2000);
   
 }
 
+
+//Read additional SBUS channels to switch sounds
 void SBUSswitches (void){
     
     // ----  ignition switch  ---- //
@@ -268,6 +264,7 @@ void SBUSswitches (void){
     
 }
 
+//Set switches based on serial input.
 void serialSwitches (void)
 {
   sirenSwitch = sirenAxis;
@@ -276,7 +273,7 @@ void serialSwitches (void)
 }
 
 
-
+//Enable/disable sounds, and switch engine on/off based on an ignition switch
 void audioLogic (void)
 {
   if (ignitionState == 2)
@@ -296,11 +293,13 @@ void audioLogic (void)
     }
 }
 
+
+//Switch between two siren sounds based on timer.
 void sirenTimerSwitch (void)
 {
   static unsigned long sirenTime = 0;
   //static byte sirenNumber = 0;
-  if (millis() - sirenTime >5000)
+  if (millis() - sirenTime >10000)
   {
     sirenNumber ^= 1;
     sirenTime = millis();
@@ -308,6 +307,285 @@ void sirenTimerSwitch (void)
 
   soundNo = 1+sirenNumber;  // 1 = siren
 }
+
+
+
+//
+// ===========================================================================================
+// Gear simulation
+// ===========================================================================================
+// -W
+//Automatic gear simulation. Reads radio input and generates engineRPM, shaftRPM, gear and ESCspeed
+//Currently reads a specific SBUS channel
+// Required global variable: currentGlobalEngineRPM (0-500)
+//Usage: call gearSim() in the main loop and use currentGlobalEngineRPM instead of throttle for the throttle/sound calculations.
+//Use throttleCalculations2(currentGlobalEngineRPM); in main loop instead of mapThrottle() and engineMassSimulation()
+
+//last gear ratio must be 1 to have maxEngineRPM in top gear at the top of the throttle stick.
+//Make sure shift points and ratios work by calculating rpms:
+//gear up: engineShiftRPMup / ratio[n1-1] = shaftRPM. shaftRPM * ratio[n2-1] must then be larger than minEngineRPM.
+//example with ratio 4 and 2: 4000/4 = 1000. 1000*2 = 2000 > 1400, OK
+
+#define NumberOfGears 4
+//const int NumberOfGears = 6;
+const int maxEngineRPM = 5000;  //always 5000 to make scaling to sound input easier. 0-5000 rpm = 0-500 throttle input.
+const int minEngineRPM = 1400;  //Shift down rpm
+const int engineShiftRPMup = 4000; //shift up rpm
+
+#if NumberOfGears==6
+const float ratio[NumberOfGears] = {7,4.3,2.4,1.8,1.3,1};//{10,7,5,3,2,1}; 7,4,3,2,1.5,1 
+#elif NumberOfGears==4
+const float ratio[NumberOfGears] = {7,3.5,1.8,1};
+#elif NumberOfGears==2
+const float ratio[NumberOfGears] = {1.8,1};
+#endif
+
+const int maxAcceleration = 10;
+const int maxNegativeAcceleration = -10;
+
+
+//Main function
+//Shaft RPM is the output from the gearbox and controls the speed of the truck.
+//Engine RPM and shaft RPM is connected through a gear ratio.
+//While driving, Shaft RPM is calculated from engine RPM.
+//When gearing up or down, the new engine RPM after gearing is calculated from shaft RPM, as shaft RPM is directly connected to wheel RPM.
+//In an automated gearbox with clutch, the shaft RPM would decrease a bit while coasting with cluctch disengaged,
+//but in the allison torque converter gearbox, the coast time is minimal to zero.
+
+//This version works without ESC control. Idle RPM in 1st gear is neutral throttle stick. Max RPM in top gear is top of throttle stick.
+
+int gearSim()
+{
+  static int currentEngineRPM = 2000;
+  static int requestedAcceleration = 0; //= stickInputToRequestedAcceleration();
+  static int requestedGear = 1;         //autoGearSelection(currentEngineRPM);
+  static int ESCspeed = 0;
+
+
+  // - Throttle input to requestedAcceleration -
+  // In this case, requested acceleration is the difference between throttle stick and current ESC signal.
+  requestedAcceleration = stickInputToRequestedAcceleration(ESCspeed);
+
+  // - Add requested acceleration to engineRPM - 
+  currentEngineRPM = accelerationToEngineRPM(currentEngineRPM,requestedGear,requestedAcceleration);
+  // - Calculate shaft RPM from engineRPM and current gear - 
+  int shaftRPM = currentEngineRPM / ratio[requestedGear-1];
+  // - Gear up or down -
+  requestedGear = autoGearSelection(currentEngineRPM);
+
+  // - Calculate the new engine RPM from the current gear and shaft RPM - 
+  currentEngineRPM = (int)(shaftRPM * ratio[requestedGear-1]);
+  currentEngineRPM = constrain(currentEngineRPM,0,maxEngineRPM);
+
+  // - ESC signal is shaftRPM (0-5000) mapped to rc signal (1000-2000) -
+  ESCspeed = (int)map(shaftRPM,0,maxEngineRPM*ratio[NumberOfGears-1],1500,2000);
+
+  // - Optional print to serial (Serial plotter compatible) - 
+  HUMANSERIAL.printf("maxRPM:5000  input: %d G: %d RPM: %d SPD: %d\n", map(SBUS.channels[channelThrottleAudio-1],0,2000,1000,2000),requestedGear, currentEngineRPM, ESCspeed);
+
+  // - Convert engine RPM 0-5000 to a variable usable in throttleCalculations2() for sound math - 
+  currentGlobalEngineRPM = constrain(currentEngineRPM/10,0,500);
+}
+
+
+//Compares stick input to current truck speed and uses the difference as acceleration variable.
+int stickInputToRequestedAcceleration (int currentESCspeed)
+{
+  int stickInput = map(SBUS.channels[channelThrottleAudio-1],0,2000,1000,2000);
+  int reqAcceleration = stickInput - currentESCspeed;
+  reqAcceleration = reqAcceleration ;
+
+  
+  return reqAcceleration;
+}
+
+
+int stickInputToRequestedAcceleration2 (int currentESCspeed)
+{
+  static int lastInput = throttleCenter;
+  int stickInput = map(SBUS.channels[channelThrottleAudio-1],0,2000,1000,2000);
+  int reqAcceleration = stickInput - lastInput;
+  reqAcceleration = reqAcceleration ;
+
+  
+  return reqAcceleration;
+}
+
+//Automatic gear selector. Gear up if engine RPM is more than max, gear down if engine RPM is less than min RPM.
+int autoGearSelection (int engineRPM)
+{
+  static int reqGearValue = 1;
+  
+
+  
+  
+  
+    if (engineRPM > engineShiftRPMup)
+    {
+      reqGearValue++;
+    }
+    if (engineRPM < minEngineRPM)
+    {
+      reqGearValue--;
+    }
+    reqGearValue = constrain(reqGearValue,1,NumberOfGears); //stick to allowed gear values
+    
+  
+
+ 
+  return reqGearValue;
+}
+
+
+//Update engineRPM based on requested acceleration from the input function.
+int accelerationToEngineRPM(int engineRPM,int reqGearValue,int reqAcceleration)
+{
+  //divide acceleration value by x to slow down engine response.
+  //constrain acceleration to less than max acceleration to keep sane.
+  if(reqAcceleration > 0)
+  {
+    reqAcceleration = reqAcceleration/4;
+    reqAcceleration = constrain(reqAcceleration,0,maxAcceleration);
+  }
+  if(reqAcceleration < 0)
+  {
+    reqAcceleration = reqAcceleration/4;
+    reqAcceleration = constrain(reqAcceleration,maxNegativeAcceleration,0);
+  }
+    
+
+  //Update engine RPM every x millisecond. Can include gear value in calculation to slow down acceleration in higher gears.
+  static unsigned long engineRPMUpdateTime = millis();
+  if (engineRPMUpdateTime - millis() > 1) //reqGearValue*1 = acceleration is slower for higher gears
+  {
+    engineRPM = engineRPM + reqAcceleration; //alternative: engineRPM + reqAcceleration * inverted gearmodifier
+    engineRPMUpdateTime = millis();
+  }
+  return engineRPM;
+}
+
+//Convert engine RPM to ESC signal value? TODO?
+int engineRPMtoESCspeed(int engineRPM,int reqGearValue)
+{
+  static int reqESCspeed = throttleCenter;
+  
+  reqESCspeed = engineRPM;// * reqGearValue;
+  
+  return reqESCspeed;
+}
+
+
+
+
+//
+// =======================================================================================================
+// Throttle Calculations. Curves, mass simulation, scaling and converting to interval -W split up
+// =======================================================================================================
+// These functions replace mapThrottle and engineMassSimulation functions.
+// They do the same, but are split up in modules to more easily change behaviour and reuse calculation methods.
+
+// Input the mapped throttle value (0-500), modify, output scaled interrupt interval.
+
+
+//Throttle calculations for input from mapThrottle()
+void throttleCalculations(int32_t tempThrottle)
+{
+  //static int32_t  tempThrottle = 0;
+  static unsigned long throtMillis;
+  static unsigned long printMillis;
+
+  
+  if (millis() - throtMillis > 2) { // Every 2ms
+    throtMillis = millis();
+
+    tempThrottle = rpmCurves(tempThrottle);                   //shift points or linear
+    tempThrottle = massSim(tempThrottle);                     //Mass simulation
+    currentRpmScaled = convertRPMtoInterval(tempThrottle);    //scale to interval
+
+  }
+}
+
+//Throttle calculations for input from gearSim()
+//Includes volume calculations from mapThrottle() function.
+void throttleCalculations2(int32_t tempThrottle)
+{
+  //static int32_t  tempThrottle = 0;
+  static unsigned long throtMillis;
+  static unsigned long printMillis;
+
+  if (millis() - throtMillis > 2) { // Every 2ms
+    throtMillis = millis();
+
+    volumeCalculation(tempThrottle);
+    //tempThrottle = rpmCurves(tempThrottle);                   //shift points or linear
+    tempThrottle = massSim(tempThrottle);                     //Mass simulation
+    currentRpmScaled = convertRPMtoInterval(tempThrottle);    //scale to interval
+
+  }
+}
+
+
+// Calculate throttle dependent engine volume. Copied from mapThrottle()
+int32_t volumeCalculation(int32_t currentThrottle)
+{
+  if (!escIsBraking && engineRunning) throttleDependentVolume = map(currentThrottle, 0, 500, engineIdleVolumePercentage, 100);
+  else throttleDependentVolume = engineIdleVolumePercentage;
+
+  // Calculate engine rpm dependent turbo volume
+  if (!escIsBraking && engineRunning)
+  {
+    //100,500 instead of 0,500 in map to delay the turbo sound curve a bit.
+    //constrain to limit the value
+    //int temp to avoid having the interrupt using an unlimited value
+    int tempthrottleDependentTurboVolume = map(currentRpm, 50, 500, turboIdleVolumePercentage, 100);
+    throttleDependentTurboVolume = constrain(tempthrottleDependentTurboVolume,turboIdleVolumePercentage, 100);
+  }
+  else throttleDependentTurboVolume = turboIdleVolumePercentage;
+}
+
+
+int32_t rpmCurves(int32_t curThrottle)
+{
+  int32_t mappedThrottle = 0;
+  // compute rpm curves
+  if (shifted) mappedThrottle = reMap(curveShifting, curThrottle);
+  else mappedThrottle = reMap(curveLinear, curThrottle);
+  return mappedThrottle;
+}
+
+//Mass simulation, copied from engineMassSimulation()
+int32_t massSim(int32_t mappedThrottle)
+{
+  //int acc = 3;
+  // Accelerate engine
+    if (mappedThrottle > (currentRpm + acc) && (currentRpm + acc) < maxRpm && engineState == 2 && !escIsBraking && engineRunning) {
+      if (!airBrakeTrigger) { // No acceleration, if brake release noise still playing
+        currentRpm += acc;
+        if (currentRpm > maxRpm) currentRpm = maxRpm;
+      }
+    }
+
+    // Decelerate engine
+    if (mappedThrottle < currentRpm || escIsBraking) {
+      currentRpm -= dec;
+      if (currentRpm < minRpm) currentRpm = minRpm;
+    }
+    return currentRpm;
+}
+
+//Convert RPM to interrupt interval. Copied from engineMassSimulation()
+uint32_t convertRPMtoInterval(int32_t currentRpm)
+{
+  // Speed (sample rate) output
+  return map(currentRpm, minRpm, maxRpm, maxSampleInterval, minSampleInterval);
+}
+
+
+
+// ===================================================================================================================
+// Items below not currently in use.
+
+
 
 
 //
@@ -435,8 +713,17 @@ void mapThrottle() {
   else throttleDependentVolume = engineIdleVolumePercentage;
 
   // Calculate engine rpm dependent turbo volume
-  if (!escIsBraking && engineRunning) throttleDependentTurboVolume = map(currentRpm, 0, 500, turboIdleVolumePercentage, 100);
+  if (!escIsBraking && engineRunning)
+  {
+    //100,500 instead of 0,500 in map to delay the turbo sound curve a bit.
+    //constrain to limit the value
+    //int temp to avoid having the interrupt using an unlimited value
+    int tempthrottleDependentTurboVolume = map(currentRpm, 200, 500, turboIdleVolumePercentage, 100);
+    throttleDependentTurboVolume = constrain(tempthrottleDependentTurboVolume,turboIdleVolumePercentage, 100);
+  }
   else throttleDependentTurboVolume = turboIdleVolumePercentage;
+
+  
 
   // reversing sound trigger signal (TODO)
   /*if (reverseSoundMode == 1) {
@@ -467,63 +754,7 @@ void mapThrottle() {
 }
 
 
-//
-// =======================================================================================================
-// Throttle Calculations. Curves, mass simulation, scaling and converting to interval -W split up
-// =======================================================================================================
-// Input the mapped throttle value (0-500), modify, output scaled interrupt interval.
-// W: Split it up into separate functions to easily enable or disable specific items.
 
-void throttleCalculations(int32_t tempThrottle)
-{
-  //static int32_t  tempThrottle = 0;
-  static unsigned long throtMillis;
-  static unsigned long printMillis;
-
-  if (millis() - throtMillis > 2) { // Every 2ms
-    throtMillis = millis();
-
-    tempThrottle = rpmCurves(tempThrottle);                   //shift points or linear
-    tempThrottle = massSim(tempThrottle);                     //Mass simulation
-    currentRpmScaled = convertRPMtoInterval(tempThrottle);    //scale to interval
-
-  }
-}
-    
-
-int32_t rpmCurves(int32_t curThrottle)
-{
-  int32_t mappedThrottle = 0;
-  // compute rpm curves
-  if (shifted) mappedThrottle = reMap(curveShifting, curThrottle);
-  else mappedThrottle = reMap(curveLinear, curThrottle);
-  return mappedThrottle;
-}
-
-int32_t massSim(int32_t mappedThrottle)
-{
-  //int acc = 3;
-  // Accelerate engine
-    if (mappedThrottle > (currentRpm + acc) && (currentRpm + acc) < maxRpm && engineState == 2 && !escIsBraking && engineRunning) {
-      if (!airBrakeTrigger) { // No acceleration, if brake release noise still playing
-        currentRpm += acc;
-        if (currentRpm > maxRpm) currentRpm = maxRpm;
-      }
-    }
-
-    // Decelerate engine
-    if (mappedThrottle < currentRpm || escIsBraking) {
-      currentRpm -= dec;
-      if (currentRpm < minRpm) currentRpm = minRpm;
-    }
-    return currentRpm;
-}
-
-uint32_t convertRPMtoInterval(int32_t currentRpm)
-{
-  // Speed (sample rate) output
-  return map(currentRpm, minRpm, maxRpm, maxSampleInterval, minSampleInterval);
-}
 
 
 

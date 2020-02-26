@@ -15,7 +15,13 @@ void buttonSetupCalibration (void){
   //move throttlefull here static?
   HUMANSERIAL.println("calibration");
 
-  throttleAxis = pulseWidth[2];
+  int throttleAxis = map(SBUS.channels[channelThrottleESC-1],0,2000,1000,2000);
+
+  #if defined TFT_DISPLAY
+      tft.setCursor(0, 0, 2);
+      tft.print("Input:");
+      tft.println(throttleAxis);
+  #endif
 
   switch (buttonSetupMenuSelection)
   {
@@ -26,10 +32,19 @@ void buttonSetupCalibration (void){
          HUMANSERIAL.println("release");
          //flash cross
          #if defined TFT_DISPLAY
-          tft.setCursor(0, 0, 2);
-          tft.println("Release to calibrate");
+          tft.setCursor(0, 20, 2);
+          tft.println("Release button to calibrate");
          #endif
+
       }
+
+      #if defined TFT_DISPLAY
+          tft.setCursor(0, 20, 2);
+          tft.println("Hold throttle full and click button");
+      #endif
+
+      //while(digitalRead(35) == LOW)
+      //  ;
        
       buttonSetupMenuSelection = 1;
       break;
@@ -37,10 +52,7 @@ void buttonSetupCalibration (void){
     case 1:
       HUMANSERIAL.println("full throttle");
       //flash full throttle
-      #if defined TFT_DISPLAY
-          //tft.setCursor(0, 0, 2);
-          tft.println("Hold throttle full and click button");
-      #endif
+      
       
       if(digitalRead(35) == 0)
       {
@@ -50,25 +62,33 @@ void buttonSetupCalibration (void){
         else                                { throttleAxisReversed = 1; }
 
         #if defined TFT_DISPLAY
-          //tft.setCursor(0, 0, 2);
+          tft.setCursor(0, 40, 2);
           tft.print(throttleFull);
           tft.print("  Reversed:");
           tft.println(throttleAxisReversed);
         #endif  
   
         buttonSetupMenuSelection = 2;
+
+        #if defined TFT_DISPLAY
+          tft.setCursor(0, 60, 2);
+          tft.println("Hold throttle at the point motor engages");
+        #endif 
+      
         //** specialtiming phase to 255?
 
       }
+
+      while(digitalRead(35) == LOW)
+        ;
+      
+        
       break;
     
     case 2:
       HUMANSERIAL.println("neutral upper");
 
-      #if defined TFT_DISPLAY
-          //tft.setCursor(0, 0, 2);
-          tft.println("Hold throttle at the point motor engages");
-      #endif  
+       
 
       if(digitalRead(35) == 0)
       {
@@ -80,23 +100,29 @@ void buttonSetupCalibration (void){
         buttonSetupMenuSelection = 3;
 
         #if defined TFT_DISPLAY
-          //tft.setCursor(0, 0, 2);
+          tft.setCursor(0, 80, 2);
           tft.print("Neutral Offset: ");
           tft.println(neutralUpperOffset);
+        #endif 
+
+        #if defined TFT_DISPLAY
+          tft.setCursor(0, 100, 2);
+          tft.println("Click to save...");
         #endif 
         
         //** specialtiming phase to 255?
 
       }
+
+      while(digitalRead(35) == LOW)
+        ;
+        
       break;
 
     case 3:
       HUMANSERIAL.println("done?");
 
-      #if defined TFT_DISPLAY
-          //tft.setCursor(0, 0, 2);
-          tft.println("Click to save...");
-      #endif  
+       
 
       if(digitalRead(35) == 0)
       {
@@ -109,8 +135,8 @@ void buttonSetupCalibration (void){
         //ESP32soundModuleCalibrate();
 
         #if defined TFT_DISPLAY
-          //tft.setCursor(0, 0, 2);
-          tft.println("OK");
+          tft.setCursor(0, 100, 2);
+          tft.println("Click to save...OK");
         #endif 
 
       

@@ -64,7 +64,7 @@ volatile int engineIdleVolumePercentage = 30; // the engine volume will be throt
 //#include "1000Hz.h" // 1000Hz test tone
 
 // Adjust the additional turbo sound (set "turboVolumePercentage" to "0", if you don't want it) --------
-volatile int turboVolumePercentage = 40; // Adjust the turbo volume (usually = 100%, never more!)
+volatile int turboVolumePercentage = 100; // Adjust the turbo volume (usually = 100%, never more!)
 volatile int turboIdleVolumePercentage = 10; // the turbo volume will be throttle dependent (usually = 10%, never more than 100%!)
 #include "sounds/TurboWhistle.h" // Turbo sound, playing in parallel with engine sound!
 
@@ -75,7 +75,7 @@ volatile int hornVolumePercentage = 100; // Adjust the horn volume (usually = 10
 //#include "westinghouseHorn.h" // American truck horn
 //#include "FireTruckAirHorn.h" // US fire truck air horn
 //#include "CarHorn.h" // A boring car horn
-//#include "TruckHorn.h" // A generic truck horn
+//#include "sounds/TruckHorn.h" // A generic truck horn
 //#include "PeterbiltHorn.h" // A Peterbilt truck horn
 
 // Choose the siren / additional horn sound (uncomment the one you want) --------
@@ -96,7 +96,7 @@ volatile int brakeVolumePercentage = 100; // Adjust the brake volume (usually = 
 //#include "sounds/TruckAirBrakes.h" // Short truck air brake sound
 #include "sounds/TruckAirBrakesLong.h" // Long truck air brake sound
 
-volatile int brakePuffVolumePercentage = 50; // Adjust the brake volume (usually = 100%, never more!)
+volatile int brakePuffVolumePercentage = 40; // Adjust the brake volume (usually = 100%, never more!)
 #include "usersounds/luftbremse_1.h" // short truck air brake sound
 //#include "usersounds/TruckAirBrakes2.h"
 

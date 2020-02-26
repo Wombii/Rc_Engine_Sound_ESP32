@@ -91,7 +91,7 @@ static unsigned long lastSerialTime;
   // <0,1500,1,1,1> 
   // 0, throttle, siren, horn, ignition
 
-  // <1,1500,50,50,2000,1,1>
+  // <1,1500,10,10,1900,0,1>
   // 1, throttleCenter, neutralUpperOffset, neutralLowerOffset, throttleFull, throttleAxisReversed, reverseType2
 
   byte modeSelect;
