@@ -1,8 +1,7 @@
 
 # ALLISON GEARBOX + SBUS MOD BY Wombii
- https://github.com/Wombii/Rc_Engine_Sound_ESP32
- https://www.youtube.com/watch?v=9ex9XDmr8_Q&t=185s
- For ESP32 TTGO_display
+ - https://www.youtube.com/watch?v=9ex9XDmr8_Q
+ - For ESP32 TTGO_display
 
 ## WARNING: You should not use this code directly. It's highly specialized for my specific truck and transmitter setup!
 Shared for inspiration only!
