@@ -1,3 +1,31 @@
+
+# ALLISON GEARBOX + SBUS MOD BY Wombii
+ https://github.com/Wombii/Rc_Engine_Sound_ESP32
+ https://www.youtube.com/watch?v=9ex9XDmr8_Q&t=185s
+ For ESP32 TTGO_display
+
+## WARNING: You should not use this code directly. It's highly specialized for my specific truck and transmitter setup!
+Shared for inspiration only!
+
+ * Butchered to accept SBUS.
+ *   - Outputs steering and gear channels directly to servo output pins.
+ *   - Outputs managed esp32 signal based on automatic gearbox logic and inertia.
+ * Engine sound, inertia and gearbox logic mostly replaced to simulate automatic gearbox.
+ * Logic to trick standard ESC into reverse mode.
+ *   - Reverse gear selected by separate transmitter switch.
+ * WIFI OTA update possible.
+ * Changed sound setup to use 2 siren sounds instead of indicators.
+ * Completely changed sound triggering.
+ * Moved soundfiles to subfolder.
+ * Rearranged functions to separate files.
+ *  //Added a sound for applying brakes// Not active
+ * Disabled LED and shaker.
+ * SBUS preparechannels function based on methods from SBUS library from https://github.com/mikeshub/FUTABA_SBUS
+
+version = 3.4 - W-SBUS-2Siren-ALLISONGEARBOX
+
+# - Original Readme below -
+
 # This is an Arduino RC engine sound & light controller for ESP32
 It's based on the ATmega 328 version: https://github.com/TheDIYGuy999/Rc_Engine_Sound
 and on bitlunis Halloween example: https://github.com/bitluni/MotionPumpkin
