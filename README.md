@@ -1,20 +1,24 @@
-# This is an Arduino RC engine sound generator for ESP32
+# This is an Arduino RC engine sound & light controller for ESP32
 It's based on the ATmega 328 version: https://github.com/TheDIYGuy999/Rc_Engine_Sound
 and on bitlunis Halloween example: https://github.com/bitluni/MotionPumpkin
 
 ## Features:
-- Many selectable engine sounds and startup sounds for cars and trucks
+- Unique vehicle mass inertia simulation (connect your crawler type ESC to pin 33). Throttle output is altered during shifting of a mechanical 3 speed transmission for smooth shifting, gear protection and realistic sound. Works just fine with TAMIYA 3 speed transmissions. Should work as well with crawler 2 speed transmissions. The ESC is controlled by a state machine with the following states: driving forward & reverse (varible acceleration, depending on throttle position), neutral, braking forward & reverse (variable deceleration with fine granularity, according to "reverse throttle" position). It also allows to control the brake lights, the brake sound, the reversing light & the reversing beep sound properly. Acceleration & deceleration (coasting & braking) are adjustable separately for ech gear to ensure maximum realism.
+- Unique "virtual clutch" allows to rev the engine below an adjustable ESC output speed. Above, the clutch engages and ensures, that the engine sound is in synch with the wheel RPM. Sounds and behaves just great in combination with a shifting transmission!
+- Many selectable sounds: engine cranking, engine idling, engine revving, turbo whining, diesel ignition "knock", wastegate valve, horns, sirens, reversing beep, air brake, parking brake, gear shifting etc.
+- Realistic engine sound is mixed together on the fly from up to 4 sounds: engine idling, turbo, wastegate (all with variable sampling rate), Diesel ignition knock (fixed sampling rate, so it does not vary in pitch)
+- Load (throttle position) dependent volume sounds: idle, rev, Diesel knock
+- Engine RPM dependent volume sounds: turbo, wastegate
+- Dozens of engine & other sounds included, you can also compose your own, using Audacity and bitlunis conversion tool (link above)
+- Engine RPM range and inertia adjustable, volume of all sounds adjustable, engine sounds separatly for load and idling.
+- Many other paramerets can be adjusted. All adjustments are easily accessible in "Adjustments.h"
 - Sound files up to 22'050Hz, 8bit, mono can be used
-- Works best with a PAM8403 amplifier module, connected to pin 25, via a 10kOhm potentiometer
-- The horn is played on pin 26 (see wiring instructions in code)
-- The engine RPM is calculated according to RC signal input on pin 13 *** CAUTION, 3.3V max.! *** 330 Ohm resistors on all I/O pins recommended!
-- Fire truck sounds, police sounds, Swiss post bus sound
-- Truck air brake sounds
-- Truck reversing beep
-- Gear shifting is simulated in "curves.h"
-- Light effects: headlights, tail lights, brake lights, reversing light, blue light
-- Engine vibration simulation, using a shaker motor with excentric weight
-- Vehicle mass simulation (connect your crawler type ESC to pin 33)
+- Compatible input signals: PWM, PPM, Serial (Micro RC Receiver only)
+- Works best with a PAM8403 amplifier module, connected to pin 25 & 26, via 10kOhm resistors & a 10kOhm potentiometer (see schematic below)
+- The engine RPM is calculated according to RC signal input on pin 13 *** CAUTION, 3.3V max. on all pins! *** 330 Ohm resistors on all I/O pins recommended!
+- Non linear throttle curves can be generated in "curves.h"
+- Light effects: headlights, tail lights, brake lights, fog lights, roof lights, cab lights, reversing light, indicators (turn signals), hazard lights, blue light etc. (max. 12 outputs)
+- Engine vibration simulation, using a shaker motor with excentric weight: Strong vibration while cranking, medium wlile idling, slight while revving
 - Use an ESP32, CPU frequency must be set to 240MHz
 
 ## New in V 0.1:
@@ -148,14 +152,81 @@ and on bitlunis Halloween example: https://github.com/bitluni/MotionPumpkin
 - Bug fixed: direct transition from state "braking backwards" to "driving backwards" now working
 - failsafe function for serial signal added. Emergency brake is triggered in case of RC signal loss (serial & PWM mode only, PPM will follow)
 
+## New in V 2.5:
+- 3rd brake light on pin 32 added
+- "escPulseSpan" > 1400 now working properly. Allows to accelerate and decelerate even smoother as well as limiting the top speed to a realistic level
+
+## New in V 2.6:
+- Indicator activation point adjustable with "indicatorOn"
+- Norwegian siren, new air brake sound
+- Door noise
+- sound files moved to /sounds
+- optimized bluelight patterns, using the new, optional "delay" variable. Latest statusLED library update required: https://github.com/TheDIYGuy999/statusLED
+
+## New in V 2.7:
+- Hornblasters train horns added
+- Horns are now louder
+- Trash removed
+- Acceleratoin & deceleration now shifting transmission gear dependent
+
+## New in V 2.8:
+- "clutchClosingPoint" configuration variable added. Prevents engine sound from "rubber band effect". Engine sound is in synch (clutch engaged) with ESC power above this value
+- Virtual clutch is also disengaging during gear shifting, allowing the engine rpm to settle down during shifting
+- Acceleration speed now variable, depending on throttle position
+- Added way more inertia to make vehicle behavior even more realistic
+- Brake has now much finer granularity
+
+## New in V 2.9:
+- "shiftingAutoThrottle" is altering throttle for synchronizing while shifting the TAMIYA 3 speed transmission -> Gearbox is protected, extreme realism in engine sound!
+- More inertia added, engine idle volume lowered to 40%
+
+## New in V 2.91:
+- Engine sound was slowing down too much during braking. This bug is now solved
+- No turbo sound while braking: Bug solved
+- King Hauler parameters fine adjusted
+- "clutchClosingPoint" renamed to "clutchEngagingPoint"
+
+## New in V 3.0:
+- Ramping ESC signal faster below "clutchEngagingPoint" to prevent clutch from excessive slipping
+- Solved a 2nd engine rpm bug during braking
+
+## New in V 3.1:
+- Added a new, pretty realistic SCANIA R620 "Straight Pipe" engine sound (ScaniaR620Uphill2.h). Pure goose flesh!
+- Detroit diesel sounds with more bass added
+- A speaker with good bass reproduction is required!
+
+## New in V 3.2:
+- Added the new "Wastegate" sound. It is triggered, if the throttle is dropped rapidly
+- Added Unimog U 1000, uses the new Wastegate sound
+- Added AM General M35 truck
+
+## New in V 3.3:
+- Dimmed headlights during engine start
+- International DT-466 sounds added
+- New SCANIA V8 added
+- Brake sound moved to the fixed sample rate playback interrupt
+- Cleaned up placback interrupt functions
+- DAC offset 128 moved to dacWrite()
+- Brake sounds don't have to start & end @ -128
+- Parking brake sound added
+- Pneumatic shifting sound added
+
+## New in V 3.4:
+- Experimental support for separate engine revving sound. See "REV_SOUND" in Adjustments.h (don't use it)
+- New Diesel ignition "knock" sound (fixed sample rate), played in synch with the engine sound (variable sample rate). This results in a way more realistic Diesel sound, because the ignition "knock" does not vary in pitch.
+- engine sound is now mixed together from up to 4 sounds: idle, turbo, wastegate, Diesel knock. All of them are variable in volume, depending on throttle position or engine RPM. You can adjust everything, using a lot of variables in "Adjustments,h". The result is a very realistic engine sound. allows to use an engine RPM range of 3 instead of 2 without sounding strange
+- New squeaky brake sound
+- Up to 11 sounds are now played in parallel!
+
+
 ## On the todo list:
 - solving ticking noise issue in serial communication mode
 - adding more sounds
-- adding brake sound
-- cleaning up code
+- adding SBUS protocol
 - adding schematic for LED wiring (for now pinout see code)
+- designing a proper PCB
 
-## Ho to create new sound arrays:
+## How to create new sound file arrays:
 
 ### Audacity:
 - Import the sound file you want in Audacity
@@ -173,6 +244,7 @@ and on bitlunis Halloween example: https://github.com/bitluni/MotionPumpkin
 - select "resample" and the frequency (22'050 recommended)
 - a .h file is generated and downloaded
 - move the .h file to your sketch directory
+- rename the variables, according to the exising files of the same category
 
 ### Processing the new header file with your sound:
 - include this .h file in "settings.h"
@@ -185,6 +257,8 @@ and on bitlunis Halloween example: https://github.com/bitluni/MotionPumpkin
 ![](https://github.com/TheDIYGuy999/Rc_Engine_Sound_ESP32/blob/master/wiring.jpg)
 
 ![](https://github.com/TheDIYGuy999/Rc_Engine_Sound_ESP32/blob/master/shakerDriver.jpg)
+
+For now, do the wiring according to the pin names in the sketch.
 
 ## Pictures:
 First prototype

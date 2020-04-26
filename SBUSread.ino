@@ -89,7 +89,7 @@ void SBUSfailsafeTimeout(unsigned long failsafeTimeoutTimer, unsigned long timeo
   //Serial.println((millis() - failsafeTimeoutTimer));
   if (millis() - failsafeTimeoutTimer > timeoutDuration)
   {
-    SBUS.failsafe = 4;
+    SBUS.failsafe = 8;
   }
 }
 
@@ -171,11 +171,20 @@ void SBUSinput(void)
       if (SBUS.tempArray[24] == 0)
       {
         //Do the things. Either set channelsReady = 1 here, or go directly to data processing.
+
+        //copy from the buffer that will be partially overwritten when new data comes in to an array that can be used for data processing and passthrough.
+        for(byte i=0; i<25; i++)
+        {
+          SBUS.receivedSBUSdata[i] = SBUS.tempArray[i]; 
+        }
+        
         SBUS.failsafe = 0;            //Clearing the failsafe state in case it's been set by the timeout function.
         SBUSpreparechannels_M();      //Process the data set into channels (11 bits per channel)
         #if sbusdebug
         SBUSprintstuff();
         #endif
+
+        
       }
       //if the endframe doesn't match a good full read
       else
@@ -215,32 +224,32 @@ void SBUSpreparechannels_M()
   SBUS.channelsReady = 1; //Channels are updated and ready to use.
 
 
-  SBUS.channels[0]  = ((SBUS.tempArray[1]|SBUS.tempArray[2]<< 8) & 0x07FF);
-  SBUS.channels[1]  = ((SBUS.tempArray[2]>>3|SBUS.tempArray[3]<<5) & 0x07FF);
-  SBUS.channels[2]  = ((SBUS.tempArray[3]>>6|SBUS.tempArray[4]<<2|SBUS.tempArray[5]<<10) & 0x07FF);
-  SBUS.channels[3]  = ((SBUS.tempArray[5]>>1|SBUS.tempArray[6]<<7) & 0x07FF);
-  SBUS.channels[4]  = ((SBUS.tempArray[6]>>4|SBUS.tempArray[7]<<4) & 0x07FF);
-  SBUS.channels[5]  = ((SBUS.tempArray[7]>>7|SBUS.tempArray[8]<<1|SBUS.tempArray[9]<<9) & 0x07FF);
-  SBUS.channels[6]  = ((SBUS.tempArray[9]>>2|SBUS.tempArray[10]<<6) & 0x07FF);
-  SBUS.channels[7]  = ((SBUS.tempArray[10]>>5|SBUS.tempArray[11]<<3) & 0x07FF);
-  SBUS.channels[8]  = ((SBUS.tempArray[12]|SBUS.tempArray[13]<< 8) & 0x07FF);
-  SBUS.channels[9]  = ((SBUS.tempArray[13]>>3|SBUS.tempArray[14]<<5) & 0x07FF);
-  SBUS.channels[10] = ((SBUS.tempArray[14]>>6|SBUS.tempArray[15]<<2|SBUS.tempArray[16]<<10) & 0x07FF);
-  SBUS.channels[11] = ((SBUS.tempArray[16]>>1|SBUS.tempArray[17]<<7) & 0x07FF);
-  SBUS.channels[12] = ((SBUS.tempArray[17]>>4|SBUS.tempArray[18]<<4) & 0x07FF);
-  SBUS.channels[13] = ((SBUS.tempArray[18]>>7|SBUS.tempArray[19]<<1|SBUS.tempArray[20]<<9) & 0x07FF);
-  SBUS.channels[14] = ((SBUS.tempArray[20]>>2|SBUS.tempArray[21]<<6) & 0x07FF);
-  SBUS.channels[15] = ((SBUS.tempArray[21]>>5|SBUS.tempArray[22]<<3) & 0x07FF);
+  SBUS.channels[0]  = ((SBUS.receivedSBUSdata[1]|SBUS.receivedSBUSdata[2]<< 8) & 0x07FF);
+  SBUS.channels[1]  = ((SBUS.receivedSBUSdata[2]>>3|SBUS.receivedSBUSdata[3]<<5) & 0x07FF);
+  SBUS.channels[2]  = ((SBUS.receivedSBUSdata[3]>>6|SBUS.receivedSBUSdata[4]<<2|SBUS.receivedSBUSdata[5]<<10) & 0x07FF);
+  SBUS.channels[3]  = ((SBUS.receivedSBUSdata[5]>>1|SBUS.receivedSBUSdata[6]<<7) & 0x07FF);
+  SBUS.channels[4]  = ((SBUS.receivedSBUSdata[6]>>4|SBUS.receivedSBUSdata[7]<<4) & 0x07FF);
+  SBUS.channels[5]  = ((SBUS.receivedSBUSdata[7]>>7|SBUS.receivedSBUSdata[8]<<1|SBUS.receivedSBUSdata[9]<<9) & 0x07FF);
+  SBUS.channels[6]  = ((SBUS.receivedSBUSdata[9]>>2|SBUS.receivedSBUSdata[10]<<6) & 0x07FF);
+  SBUS.channels[7]  = ((SBUS.receivedSBUSdata[10]>>5|SBUS.receivedSBUSdata[11]<<3) & 0x07FF);
+  SBUS.channels[8]  = ((SBUS.receivedSBUSdata[12]|SBUS.receivedSBUSdata[13]<< 8) & 0x07FF);
+  SBUS.channels[9]  = ((SBUS.receivedSBUSdata[13]>>3|SBUS.receivedSBUSdata[14]<<5) & 0x07FF);
+  SBUS.channels[10] = ((SBUS.receivedSBUSdata[14]>>6|SBUS.receivedSBUSdata[15]<<2|SBUS.receivedSBUSdata[16]<<10) & 0x07FF);
+  SBUS.channels[11] = ((SBUS.receivedSBUSdata[16]>>1|SBUS.receivedSBUSdata[17]<<7) & 0x07FF);
+  SBUS.channels[12] = ((SBUS.receivedSBUSdata[17]>>4|SBUS.receivedSBUSdata[18]<<4) & 0x07FF);
+  SBUS.channels[13] = ((SBUS.receivedSBUSdata[18]>>7|SBUS.receivedSBUSdata[19]<<1|SBUS.receivedSBUSdata[20]<<9) & 0x07FF);
+  SBUS.channels[14] = ((SBUS.receivedSBUSdata[20]>>2|SBUS.receivedSBUSdata[21]<<6) & 0x07FF);
+  SBUS.channels[15] = ((SBUS.receivedSBUSdata[21]>>5|SBUS.receivedSBUSdata[22]<<3) & 0x07FF);
 
   
-  if (SBUS.tempArray[23] & (1<<0)) {
+  if (SBUS.receivedSBUSdata[23] & (1<<0)) {
     SBUS.channels[16] = 1;
   }
   else{
     SBUS.channels[16] = 0;
   }
   
-  if (SBUS.tempArray[23] & (1<<1)) {
+  if (SBUS.receivedSBUSdata[23] & (1<<1)) {
     SBUS.channels[17] = 1;
   }
   else{
@@ -248,7 +257,8 @@ void SBUSpreparechannels_M()
   }
 
   //2 of the bits from the last data byte contain framelost and failsafe
-  SBUS.failsafe = SBUS.tempArray[23] & (3<<2);
+  int failsafebits = SBUS.receivedSBUSdata[23] & (1<<3); //(3<<2);
+  SBUS.failsafe = failsafebits>>3;
 
 
   return;

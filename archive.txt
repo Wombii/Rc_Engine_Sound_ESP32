@@ -1,0 +1,639 @@
+
+//Deals with recognising brake and reverse states. Supports double pump F/B/R ESC type and Direct/delayed F/B/R reverse type.
+void logicstuff()
+{
+
+    // ---- SETTING FLAGS ---- //
+    // ----------------------- //
+
+    //Read throttleAxis and set flags. Also check flag for reversed throttle channel.
+    // |  brake    | neutral | forward
+    // | reverse   |
+    //-------------------------------------------------------------------------------
+    byte forwardFlag = 0, backFlag = 0, reverseFlag = 0, neutralFlag = 0; //delete reverseFlag
+
+    //changed to local. Reads SBUS channel to throttle info, but can read pulseWidth[2] instead.
+    int throttleAxis = map(SBUS.channels[channelThrottleESC-1],0,2000,1000,2000);//pulseWidth[2];
+
+
+
+    #if 1               
+    if (throttleAxisReversed)
+    {
+        if (throttleAxis < throttleNeutralLowerLimit)
+        forwardFlag = 1;
+        
+        else if (throttleAxis > throttleNeutralUpperLimit){
+        backFlag = 1;
+        }  
+        
+        else //if (throttleAxis < throttleNeutralUpperLimit && throttleAxis > throttleNeutralLowerLimit)
+        neutralFlag = 1;
+
+    }
+    else //if not reversed
+    {
+        if (throttleAxis > throttleNeutralUpperLimit)
+        forwardFlag = 1;
+        
+
+        else if (throttleAxis < throttleNeutralLowerLimit){
+        backFlag = 1;
+        } 
+        
+        else //if (throttleAxis < throttleNeutralUpperLimit && throttleAxis > throttleNeutralLowerLimit)
+        neutralFlag = 1;
+    }
+
+    #if MYSPECIALCASE
+    /*
+     * tx: slow ch1 esc. direct ch10 stick.
+     * if stick is back
+     *    brake
+     * if esc is back
+     *    brake and reverse normal?
+     */
+    int throttleAudioAxis = map(SBUS.channels[channelThrottleAudio-1],0,2000,1000,2000);//pulseWidth[2];
+    if (throttleAxisReversed)
+    {
+        if (throttleAudioAxis < throttleNeutralLowerLimit)
+        //backFlag = 0;
+        ;
+        
+        else if (throttleAudioAxis > throttleNeutralUpperLimit){
+        backFlag = 1;
+        }  
+        
+        else //if (throttleAxis < throttleNeutralUpperLimit && throttleAxis > throttleNeutralLowerLimit)
+        //backFlag = 0;
+        ;
+
+    }
+    else //if not reversed
+    {
+        if (throttleAudioAxis > throttleNeutralUpperLimit)
+        //backFlag = 0;
+        ;
+        
+
+        else if (throttleAudioAxis < throttleNeutralLowerLimit){
+        backFlag = 1;
+        } 
+        
+        else //if (throttleAxis < throttleNeutralUpperLimit && throttleAxis > throttleNeutralLowerLimit)
+        //backFlag = 0;
+        ;
+    }
+    #endif
+
+    // --- USING FLAGS --- //
+    // ------------------- //
+
+    //Enable or disable reverselights and brakelights based on axis flags.
+    //--------------------------------------------------------------------
+
+    //HUMANSERIAL.print("FLAGS");
+    //HUMANSERIAL.print(backFlag);
+    //HUMANSERIAL.print(neutralFlag);
+    //HUMANSERIAL.println(forwardFlag);
+    
+    if (forwardFlag){
+      //HUMANSERIAL.println("FWD");
+      //reverseLight = 0;
+      escInReverse = 0;         //Exiting reverse if entering <forward> zone.
+      escIsBraking = 0;         //Exiting brake if entering <neutral> zone, but make double sure it's off if we go through neutral too fast to detect.
+      //brakeLight = 0;
+    }
+
+    if (neutralFlag){
+      //HUMANSERIAL.println("N");
+      escIsBraking = 0;         //Exiting brake if entering <neutral> zone.
+      //brakeLight = 0;
+    }
+
+    if (backFlag){
+      //HUMANSERIAL.println("BCK");
+      escIsBraking = 1;         //First assume we're braking. Let the reverse logic clear this flag if we're actually reversing.
+      //brakeLight = 1;
+    }
+
+    //Reverse logic
+    //-------------------------------
+    //Set reverseType2 to match your esc. 1 is double pump reverse, 0 is time delay reverse.
+    static byte reverseFlag2 = 0;
+    
+    //Double pump reverse
+    if (reverseType2){
+        static byte reverseFlagCount = 0;
+        static byte lastWasNeutralFlag = 0;
+        
+        if (backFlag)
+        {
+          //HUMANSERIAL.println(reverseFlagCount);
+          if (lastWasNeutralFlag)     //If we just passed from neutral to back
+          {
+            //HUMANSERIAL.println("R1");
+            reverseFlagCount++;         //Increment counter by 1
+            lastWasNeutralFlag = 0;     //Clear the edge flag to make sure we only increment on the edge.
+          }
+          if (reverseFlagCount >= 2)
+          {
+            reverseFlagCount = 2;       //prevent overflow, probably not necessary.
+            escIsBraking = 0;           //ESC is NOT in brake mode
+            escInReverse = 1;           //ESC is actually in reverse mode.  
+            //HUMANSERIAL.println("REV");
+          }
+        }
+        else                          //If in neutral or forward zones, clear set to allow detection of the neutral|back edge again.
+        {
+          lastWasNeutralFlag = 1;
+        }
+        if (forwardFlag)              //If in forward zone, clear reverse counter.
+        {
+          reverseFlagCount = 0;
+          //escInReverse is cleared in the previous module
+        }
+    }
+
+        
+
+    //Delayed reverse
+    //reverseDelayTicks is a number of loops corresponding to the time delay for reverse activation
+    else
+    {   
+        static byte reverseFlagCount = 0;
+        if (backFlag)
+        {
+            reverseFlagCount++;
+            if (reverseFlagCount > reverseDelayTicks){
+                //reverseLight = 1;
+                escInReverse = 1;
+                //brakeLight = 0;
+                escIsBraking = 0;
+                reverseFlagCount = reverseDelayTicks; //prevent overflow
+                }
+        }
+        else
+        {
+            reverseFlagCount = 0;
+            //reverseLight = 0;
+        }
+    } 
+    #endif
+
+    //Brake logic
+    //----------------------
+
+    //large air noise when releasing brakes
+    static byte wasBraking = 0;
+
+    if (escIsBraking)
+      wasBraking = 1;
+    if (wasBraking && !escIsBraking)
+    {
+      Serial.println("----ptsssshhhhhh");
+      airBrakeTrigger = 1;
+      wasBraking = 0;
+    }
+
+    //large air noise when releasing brakes (actually when going reverse -> forward)
+    static byte wasReversing = 0;
+
+    if (escInReverse)
+      wasReversing = 1;
+    if (wasReversing && forwardFlag)
+    {
+      Serial.println("----ptsssshhhhhh");
+      airBrakeTrigger = 1;
+      wasReversing = 0;
+    }
+/*
+    static byte wasReversing2 = 0;
+
+    if (escInReverse)
+      wasReversing2 = 1;
+    if (wasReversing2 && !reverseFlag)
+    {
+      Serial.println("----piiew");
+      airPuffTrigger = 1;
+      wasReversing2 = 0;
+    }
+
+*/
+    //Small airpuff when applying brakes
+    static byte wasNotBraking = 0;
+
+    if (!escIsBraking)
+      wasNotBraking = 1;
+    if (wasNotBraking && escIsBraking && !escInReverse)
+    {
+      Serial.println("----piiew");
+      //airBrakeTrigger = 1;
+      //airPuffTrigger = 1;
+      wasNotBraking = 0;
+    }
+
+
+    
+
+    
+}
+
+
+//Set switches based on serial input.
+void serialSwitches (void)
+{
+  sirenSwitch = sirenAxis;
+  hornSwitch = hornAxis;
+  engineOn = ignitionAxis;
+}
+
+
+//Update engineRPM based on requested acceleration from the input function.
+//This includes simulation of vehicle inertia.
+int accelerationToEngineRPM(int engineRPM,int reqGearValue,int reqAcceleration)
+{
+  //divide acceleration value by x to slow down engine response.
+  //constrain acceleration to less than max acceleration to keep sane.
+  
+  
+  if(reqAcceleration > 0)
+  {
+    reqAcceleration = reqAcceleration/reqGearValue; //Slower change at higher gears
+    reqAcceleration = reqAcceleration/reqGearValue; //Slower change at higher gears
+    reqAcceleration = reqAcceleration/(2);
+    reqAcceleration = constrain(reqAcceleration,1,maxAcceleration);
+    
+  }
+  if(reqAcceleration < 0)
+  {
+    if (pulseWidth[2] < throttleNeutralLowerLimit)
+    {
+      //reqAcceleration = reqAcceleration*reqGearValue/4;
+      reqAcceleration = (throttleCenter - pulseWidth[2])/4;
+      reqAcceleration = -reqAcceleration;
+    }
+    else
+    {
+      //reqAcceleration = reqAcceleration*reqGearValue/8;
+      //reqAcceleration = constrain(reqAcceleration,maxNegativeAcceleration,1);
+      //reqAcceleration = -10;
+      //Serial.print(reqAcceleration);
+      //Serial.print('\t');
+      reqAcceleration = map(reqAcceleration,-1,-500,-10,-200);
+      //Serial.println(reqAcceleration);
+    }
+  }
+  Serial.println(reqAcceleration);
+  
+    
+
+  //Update engine RPM every x millisecond. Can include gear value in calculation to slow down acceleration in higher gears.
+  static unsigned long engineRPMUpdateTime = millis();
+  if (millis() - engineRPMUpdateTime > 100)//(reqGearValue * 10) )//= acceleration is slower for higher gears
+  {
+    engineRPM = engineRPM + reqAcceleration; //alternative: engineRPM + reqAcceleration * inverted gearmodifier
+    engineRPMUpdateTime = millis();
+  }
+  return engineRPM;
+}
+
+
+
+
+
+
+
+//channelThrottleAudio
+//channelAmberflash
+
+/*
+void setReverseTest (void)
+{
+
+  // ---- WAIT FOR ESC --- //
+  //Send a throttleCenter signal at startup to initialise ESC
+
+  if (millis() < 2000)
+  {
+    escSignal = map(throttleCenter, 1000, 2000, 3278, 6553); // 1 - 2ms (5 - 10% pulsewidth of 65534)
+    escOut.pwm(escSignal);
+    Serial.println("WAIT");
+  }
+  else
+  {
+  
+    // ---- SETTING FLAGS ---- //
+    // ----------------------- //
+
+    //Read throttleAxis and set flags. Also check flag for reversed throttle channel.
+    // |  brake    | neutral | forward
+    // | reverse   |
+    //-------------------------------------------------------------------------------
+    byte forwardFlag = 0, backFlag = 0, reverseFlag = 0, neutralFlag = 0; //delete reverseFlag
+
+    //changed to local. Reads SBUS channel to throttle info, but can read pulseWidth[2] instead.
+    int throttleAxis = pulseWidth[2]; //map(SBUS.channels[channelThrottleAudio-1],0,2000,1000,2000);//
+    int throttleDeviationFromCenter = (throttleAxis-throttleCenter); // = -500 to +500
+
+    //tft.setCursor(0, 50, 2);
+    //tft.print("thr:");
+    //tft.print(throttleDeviationFromCenter);
+    
+    
+    //NOT COMPATIBLE WITH REVERSED THROTTLE. HIGHER VALUE FOR FORWARD ONLY!
+    //else //if not reversed
+    {
+        if (throttleAxis > throttleNeutralUpperLimit)
+        forwardFlag = 1;
+        
+
+        else if (throttleAxis < throttleNeutralLowerLimit){
+        backFlag = 1;
+        } 
+        
+        else //if (throttleAxis < throttleNeutralUpperLimit && throttleAxis > throttleNeutralLowerLimit)
+        neutralFlag = 1;
+    }
+
+    //int throttleStick = map(SBUS.channels[channelThrottleAudio-1],0,2000,1000,2000);//pulseWidth[2];
+
+
+    // --- DETECT REVERSE GEAR SWITCH --- //
+    // ---------------------------------- //
+    
+    static byte reverseGear = 0;
+    static byte reverseGearSet = 0;
+    static byte forwardGearSet = 0;
+    
+    if (map(SBUS.channels[channelReverseGear-1],0,2000,1000,2000) < 1300 )
+    {
+      reverseGear = 1;
+      //Serial.println("R1");
+    }
+    else
+    {
+      reverseGear = 0;
+      //Serial.println("R0");
+    }
+
+    // --- TRICK ESC INTO CORRECT MODE --- //
+    // ----------------------------------- //
+
+    const int commandSequencePause = 50;
+    static unsigned long commandSequenceTime = 0;
+    
+    
+    if(reverseGear) //if reverseGear Switch active
+    {
+      forwardGearSet = 0;
+      
+      if (!reverseGearSet)
+      {
+        static byte selection = 0;
+        
+        switch(selection)
+        {
+          case 0:
+            break;
+          case 1:
+            escCommand = throttleNeutralUpperLimit;
+            break;
+          case 2:
+            escCommand = throttleNeutralLowerLimit;
+            break;
+          case 3:
+            escCommand = throttleCenter;
+            break;
+          case 4:
+            escCommand = throttleNeutralLowerLimit;
+            break;
+          case 5:
+            escCommand = throttleCenter;
+            break;
+          case 6:
+            Serial.println("REV");
+            reverseGearSet = 1;
+            selection = 0;
+            break;
+          default:
+            selection = 0;
+            break;
+          
+        }
+        if (millis() - commandSequenceTime > commandSequencePause)
+        {
+          escSignal = map(escCommand, 1000, 2000, 3278, 6553); // 1 - 2ms (5 - 10% pulsewidth of 65534)
+          escOut.pwm(escSignal);
+          selection++;
+          commandSequenceTime = millis();
+        }
+      }
+      else //if reverseGearSet
+      {
+        //If we have tricked the ESC into reverse mode, the throttle input is inverted, but only on the forward side of center.
+        //esc 1000-1500 -- throttle 1500-2000.
+        escCommand = throttleCenter - throttleDeviationFromCenter;
+        if (escCommand < throttleCenter)
+        {
+          ;
+        }
+        else
+        {
+          escCommand = throttleCenter;
+        }
+        //escSignal = map(escCommand, 1000, 2000, 3278, 6553); // 1 - 2ms (5 - 10% pulsewidth of 65534)
+        //escOut.pwm(escSignal);
+      }
+    }
+
+    else
+    {
+      reverseGearSet = 0;
+
+      static byte escBrakeMode = 0;
+      static byte escBrakeCorrectionNeeded = 0;
+        
+      if (!forwardGearSet)
+      {
+        static byte selection = 0;
+        
+        switch(selection)
+        {
+          case 0:
+            break;
+          case 1:
+            escCommand = throttleNeutralUpperLimit;
+            break;
+          case 2:
+            escCommand = throttleCenter;
+            break;
+          case 3:
+            Serial.println("FWD");
+            forwardGearSet = 1;
+            selection = 0;
+            break;
+          default:
+            selection = 0;
+            break;
+          
+        }
+        if (millis() - commandSequenceTime > commandSequencePause)
+        {
+          escSignal = map(escCommand, 1000, 2000, 3278, 6553); // 1 - 2ms (5 - 10% pulsewidth of 65534)
+          escOut.pwm(escSignal);
+          selection++;
+          commandSequenceTime = millis();
+        }
+      }
+      else //if forwardGearSet
+      {
+        //esc 1000-1500 -- throttle 1500-2000.
+        escCommand = throttleCenter + throttleDeviationFromCenter;
+        if (escCommand < throttleNeutralLowerLimit)
+        {
+          escBrakeCorrectionNeeded = 1;
+          commandSequenceTime = millis();
+        }
+        else if(escCommand >= throttleNeutralLowerLimit && escCommand < throttleNeutralUpperLimit)
+        {
+          escCommand = throttleCenter;
+          if (escBrakeCorrectionNeeded)
+          {
+            escCommand = throttleNeutralUpperLimit;
+            if (millis() - commandSequenceTime > 50)//commandSequencePause)
+            {
+              escBrakeCorrectionNeeded = 0;
+              //commandSequenceTime = millis();
+             
+              
+              Serial.println("ESCcorrected");
+            }
+          }
+        }
+        else
+        {
+          escBrakeCorrectionNeeded = 0;
+          
+        }
+        //escSignal = map(escCommand, 1000, 2000, 3278, 6553); // 1 - 2ms (5 - 10% pulsewidth of 65534)
+        //escOut.pwm(escSignal);
+        
+       
+        
+      }
+    }
+    
+
+
+    // --- Determine brake and reverse for sound triggering ---
+    if (reverseGearSet)
+    {
+      escInReverse = 1;         
+      if (backFlag)
+      {
+        escIsBraking = 1; 
+      }
+      else
+      {
+        escIsBraking = 0; 
+      }     
+    }
+    else
+    {
+      escInReverse = 0; ;//turn off light and beep
+      if (backFlag)
+      {
+        escIsBraking = 1; 
+      }
+      else
+      {
+        escIsBraking = 0; 
+      }
+    }
+
+    //large air noise when releasing brakes
+    static byte wasBraking = 0;
+
+    if (escIsBraking)
+      wasBraking = 1;
+    if (wasBraking && !escIsBraking)
+    {
+      Serial.println("----ptsssshhhhhh");
+      airBrakeTrigger = 1;
+      wasBraking = 0;
+    }
+
+    //Small airpuff when applying brakes
+    static byte wasNotBraking = 0;
+
+    if (!escIsBraking)
+      wasNotBraking = 1;
+    if (wasNotBraking && escIsBraking)// && !escInReverse)
+    {
+      Serial.println("----piiew");
+      //airBrakeTrigger = 1;
+      //airPuffTrigger = 1;
+      wasNotBraking = 0;
+    }
+    
+  }
+}*/
+
+//splitting up reversetest
+
+
+
+
+
+// Calculate sound volume, copied from mapThrottle()
+void volumeCalculation2(int currentRpm, int currentThrottle)
+{
+    // Calculate throttle dependent engine idle volume
+  if (!escIsBraking && engineRunning) throttleDependentVolume = map(currentThrottle, 0, 500, engineIdleVolumePercentage, 100);
+  else throttleDependentVolume = engineIdleVolumePercentage;
+
+  // Calculate throttle dependent engine rev volume
+  if (!escIsBraking && engineRunning) throttleDependentRevVolume = map(currentThrottle, 0, 500, engineRevVolumePercentage, 100);
+  else throttleDependentRevVolume = engineRevVolumePercentage;
+
+  // Calculate throttle dependent Diesel knock volume
+    //Temp variables are necessary to prevent interrupt from using unconstrained values
+  int tempthrottleDependentKnockVolume;
+  int throttleDependentKnockVolume1 = dieselKnockIdleVolumePercentage;
+  int throttleDependentKnockVolume2 = dieselKnockIdleVolumePercentage;
+  int throttleDependentKnockVolume3 = dieselKnockIdleVolumePercentage;
+  
+  if (!escIsBraking && engineRunning) 
+  {
+    //First calculate knock based on rpm. More knock at higher rpms.
+    tempthrottleDependentKnockVolume = map(currentRpm, 250, 400, dieselKnockIdleVolumePercentage, 110);
+    throttleDependentKnockVolume1 = constrain(tempthrottleDependentKnockVolume,dieselKnockIdleVolumePercentage, 110);
+
+    //Lower knock volume based on throttle input to reduce knock when dropping throttle.
+    tempthrottleDependentKnockVolume = map(currentThrottle, 0, 450, dieselKnockIdleVolumePercentage, 70);
+    throttleDependentKnockVolume2 = constrain(tempthrottleDependentKnockVolume,dieselKnockIdleVolumePercentage, 100);
+
+    //Add extra knock based on difference between throttle and speed to simulate more knock when accelerating harder.
+    tempthrottleDependentKnockVolume = map(currentThrottle-currentSpeed, 0, 500, 100, 500);
+    throttleDependentKnockVolume3 = constrain(tempthrottleDependentKnockVolume,100, 500);
+    
+    //Calculate combined knock volume. Multiplying the values ensures knock volume is cut when releasing throttle.
+    tempthrottleDependentKnockVolume = throttleDependentKnockVolume1 * throttleDependentKnockVolume3 / 100 * throttleDependentKnockVolume2/100;
+    throttleDependentKnockVolume = constrain(tempthrottleDependentKnockVolume,dieselKnockIdleVolumePercentage, 100);
+    
+  }
+  else throttleDependentKnockVolume = dieselKnockIdleVolumePercentage;
+
+ 
+  //Knock volume debug printing (Use serial plotter for graph)
+  //Serial.printf("plotmaxY: 600, max: 100, kRpm: %d kThr: %d kLoad: %d =kVol: %d, rpm: %d\n",throttleDependentKnockVolume1,throttleDependentKnockVolume2,throttleDependentKnockVolume3,throttleDependentKnockVolume,currentRpm);
+  
+  // Calculate engine rpm dependent turbo volume
+  if (engineRunning) throttleDependentTurboVolume = map(currentRpm, 150, 500, turboIdleVolumePercentage, 100);
+  else throttleDependentTurboVolume = turboIdleVolumePercentage;
+
+  // Calculate engine rpm dependent wastegate volume
+  if (engineRunning) throttleDependentWastegateVolume = map(currentRpm, 0, 500, wastegateIdleVolumePercentage, 100);
+  else throttleDependentWastegateVolume = wastegateIdleVolumePercentage;
+}
