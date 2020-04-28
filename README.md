@@ -23,6 +23,15 @@ Shared for inspiration only!
 
 version = 3.4 - W-SBUS-2Siren-ALLISONGEARBOX
 
+## Current protoboard:
+- Connectors top to bottom: ESC, Steering, Gear, SBUS out, SBUS in (Power and ground from ESC). Power connector for amplifier and esp32 (GND,+5V). Connector for amplifier (GND,+5V,sound).
+- ~1k resistors on all signal pins. Pulldown resistors on servo and gear signal. ~10k resistors between DAC and sound out. Please check TheDiyGuy999's original schematic at the bottom.
+![](https://github.com/Wombii/Rc_Engine_Sound_ESP32/blob/master/board+esp32.jpg)
+
+![](https://github.com/Wombii/Rc_Engine_Sound_ESP32/blob/master/boardfront.jpg)
+
+![](https://github.com/Wombii/Rc_Engine_Sound_ESP32/blob/master/boardback.jpg)
+
 # - Original Readme below -
 
 # This is an Arduino RC engine sound & light controller for ESP32
